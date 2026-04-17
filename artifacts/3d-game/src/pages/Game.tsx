@@ -1,41 +1,47 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 
-const CANVAS_WIDTH = 400;
-const CANVAS_HEIGHT = 600;
-const PLAYER_WIDTH = 40;
-const PLAYER_HEIGHT = 40;
-const PLATFORM_WIDTH = 70;
-const PLATFORM_HEIGHT = 14;
-const GRAVITY = 0.35;
-const JUMP_FORCE = -13;
-const PLAYER_SPEED = 5;
-const PLATFORM_COUNT = 14;
-const SCROLL_THRESHOLD = CANVAS_HEIGHT / 3;
+const W = 400;
+const H = 600;
+const GRAVITY = 0.4;
+const BASE_JUMP = -14;
+const SPRING_JUMP = -20;
+const MOVE_SPEED = 5;
 
-type PlatformType = "normal" | "moving" | "breakable" | "spring" | "cloud";
+type PType = "normal" | "moving" | "broken" | "spring" | "disappear";
 
 interface Platform {
   id: number;
   x: number;
   y: number;
-  width: number;
-  height: number;
-  type: PlatformType;
-  vx?: number;
-  broken?: boolean;
-  bounceAnim?: number;
-  opacity?: number;
+  w: number;
+  h: number;
+  type: PType;
+  vx: number;
+  cracked: boolean;
+  crackedTimer: number;
+  bounceTimer: number;
+  used: boolean;
 }
 
-interface Enemy {
+interface Bullet {
   id: number;
   x: number;
   y: number;
   vx: number;
-  width: number;
-  height: number;
+  vy: number;
+}
+
+interface Monster {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  vx: number;
+  type: "worm" | "ufo" | "bat";
   alive: boolean;
-  phase: number;
+  frame: number;
+  hp: number;
 }
 
 interface Particle {
@@ -45,1061 +51,1374 @@ interface Particle {
   vx: number;
   vy: number;
   life: number;
-  maxLife: number;
   color: string;
-  size: number;
+  r: number;
 }
 
-interface Star {
+interface FloatingText {
+  id: number;
   x: number;
   y: number;
-  size: number;
-  twinkle: number;
-  speed: number;
+  vy: number;
+  text: string;
+  life: number;
+  color: string;
 }
 
-interface GameState {
-  playerX: number;
-  playerY: number;
-  playerVX: number;
-  playerVY: number;
-  playerFacing: number;
-  playerSquish: number;
-  platforms: Platform[];
-  enemies: Enemy[];
-  particles: Particle[];
-  score: number;
-  highScore: number;
-  scrollY: number;
+interface PowerUp {
+  id: number;
+  x: number;
+  y: number;
+  type: "spring" | "jetpack" | "hat";
+  collected: boolean;
+}
+
+interface GS {
   phase: "menu" | "playing" | "dead";
-  stars: Star[];
-  platformIdCounter: number;
-  enemyIdCounter: number;
-  particleIdCounter: number;
+  px: number;
+  py: number;
+  pvx: number;
+  pvy: number;
+  pface: number;
+  animT: number;
+  platforms: Platform[];
+  bullets: Bullet[];
+  monsters: Monster[];
+  particles: Particle[];
+  floats: FloatingText[];
+  powerups: PowerUp[];
+  score: number;
+  hi: number;
+  camY: number;
+  scrolled: number;
   keys: Record<string, boolean>;
-  cameraY: number;
-  bgHue: number;
-  jumpCombo: number;
-  lastJumpTime: number;
-  animFrame: number;
-  touchStartX: number | null;
+  mouse: { x: number; y: number };
+  jetpack: number;
+  hat: number;
+  pid: number;
+  bid: number;
+  mid: number;
+  fid: number;
+  puid: number;
+  pcid: number;
+  frameN: number;
+  aimAngle: number;
+  shootCooldown: number;
 }
 
-function makePlatform(
-  id: number,
-  x: number,
-  y: number,
-  score: number
-): Platform {
-  const rand = Math.random();
-  let type: PlatformType = "normal";
-  const difficulty = Math.min(score / 3000, 1);
+const PW = 66;
+const PH = 14;
+const PLAYER_W = 46;
+const PLAYER_H = 50;
 
-  if (rand < 0.08 * difficulty) type = "spring";
-  else if (rand < 0.2 * difficulty) type = "breakable";
-  else if (rand < 0.35 * difficulty) type = "moving";
-  else if (rand < 0.42 * difficulty) type = "cloud";
+function platGap(score: number): number {
+  const base = 55;
+  const extra = Math.min(score / 100, 70);
+  return base + extra + Math.random() * 20;
+}
 
-  const width = type === "spring" ? 60 : type === "cloud" ? 80 : PLATFORM_WIDTH;
+function makePlat(id: number, x: number, y: number, score: number): Platform {
+  const r = Math.random();
+  const d = Math.min(score / 2000, 1);
+  let type: PType = "normal";
+  if (r < 0.06 * d) type = "spring";
+  else if (r < 0.2 * d) type = "broken";
+  else if (r < 0.38 * d) type = "moving";
+  else if (r < 0.45 * d) type = "disappear";
 
+  const w = type === "spring" ? 60 : PW;
   return {
     id,
-    x: Math.random() * (CANVAS_WIDTH - width),
+    x: Math.max(0, Math.min(W - w, Math.random() * (W - w))),
     y,
-    width,
-    height: PLATFORM_HEIGHT,
+    w,
+    h: PH,
     type,
-    vx: type === "moving" ? (Math.random() > 0.5 ? 1.5 : -1.5) : 0,
-    broken: false,
-    bounceAnim: 0,
-    opacity: 1,
+    vx: type === "moving" ? (Math.random() > 0.5 ? 1.8 : -1.8) : 0,
+    cracked: false,
+    crackedTimer: 0,
+    bounceTimer: 0,
+    used: false,
   };
 }
 
-function makeStar(): Star {
+function makeMonster(id: number, camY: number, score: number): Monster {
+  const types: Array<"worm" | "ufo" | "bat"> = ["worm", "ufo", "bat"];
+  const type = types[Math.floor(Math.random() * (score > 2000 ? 3 : score > 800 ? 2 : 1))];
   return {
-    x: Math.random() * CANVAS_WIDTH,
-    y: Math.random() * CANVAS_HEIGHT,
-    size: Math.random() * 2 + 0.5,
-    twinkle: Math.random() * Math.PI * 2,
-    speed: Math.random() * 0.5 + 0.1,
+    id,
+    x: Math.random() * (W - 50),
+    y: camY - 80 - Math.random() * 200,
+    w: type === "ufo" ? 52 : type === "bat" ? 44 : 48,
+    h: type === "ufo" ? 30 : type === "bat" ? 26 : 28,
+    vx: (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 1.5),
+    type,
+    alive: true,
+    frame: 0,
+    hp: type === "ufo" ? 2 : 1,
   };
 }
 
-function initGame(savedHighScore: number): GameState {
+function init(hi: number): GS {
   const platforms: Platform[] = [];
   platforms.push({
     id: 0,
-    x: CANVAS_WIDTH / 2 - PLATFORM_WIDTH / 2,
-    y: CANVAS_HEIGHT - 80,
-    width: PLATFORM_WIDTH,
-    height: PLATFORM_HEIGHT,
+    x: W / 2 - PW / 2,
+    y: H - 100,
+    w: PW + 10,
+    h: PH,
     type: "normal",
     vx: 0,
-    broken: false,
-    bounceAnim: 0,
-    opacity: 1,
+    cracked: false,
+    crackedTimer: 0,
+    bounceTimer: 0,
+    used: false,
   });
-
-  for (let i = 1; i < PLATFORM_COUNT; i++) {
-    platforms.push(
-      makePlatform(i + 1, 0, CANVAS_HEIGHT - 80 - i * 50, 0)
-    );
+  for (let i = 1; i < 18; i++) {
+    platforms.push(makePlat(i + 1, 0, H - 100 - i * 50, 0));
   }
-
   return {
-    playerX: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2,
-    playerY: CANVAS_HEIGHT - 80 - PLAYER_HEIGHT - 2,
-    playerVX: 0,
-    playerVY: 0,
-    playerFacing: 1,
-    playerSquish: 1,
-    platforms,
-    enemies: [],
-    particles: [],
-    score: 0,
-    highScore: savedHighScore,
-    scrollY: 0,
     phase: "menu",
-    stars: Array.from({ length: 60 }, makeStar),
-    platformIdCounter: PLATFORM_COUNT + 10,
-    enemyIdCounter: 0,
-    particleIdCounter: 0,
+    px: W / 2 - PLAYER_W / 2,
+    py: H - 100 - PLAYER_H - 2,
+    pvx: 0,
+    pvy: 0,
+    pface: 1,
+    animT: 0,
+    platforms,
+    bullets: [],
+    monsters: [],
+    particles: [],
+    floats: [],
+    powerups: [],
+    score: 0,
+    hi,
+    camY: 0,
+    scrolled: 0,
     keys: {},
-    cameraY: 0,
-    bgHue: 220,
-    jumpCombo: 0,
-    lastJumpTime: 0,
-    animFrame: 0,
-    touchStartX: null,
+    mouse: { x: W / 2, y: H / 2 },
+    jetpack: 0,
+    hat: 0,
+    pid: 20,
+    bid: 0,
+    mid: 0,
+    fid: 0,
+    puid: 0,
+    pcid: 0,
+    frameN: 0,
+    aimAngle: -Math.PI / 2,
+    shootCooldown: 0,
   };
 }
 
-function spawnParticles(
-  state: GameState,
-  x: number,
-  y: number,
-  color: string,
-  count = 8
-) {
-  for (let i = 0; i < count; i++) {
-    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
-    const speed = Math.random() * 3 + 1;
-    state.particles.push({
-      id: state.particleIdCounter++,
-      x,
-      y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 2,
+function addParticles(gs: GS, x: number, y: number, color: string, n = 8) {
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i) / n + Math.random() * 0.8;
+    const spd = 1.5 + Math.random() * 3;
+    gs.particles.push({
+      id: gs.pcid++,
+      x, y,
+      vx: Math.cos(angle) * spd,
+      vy: Math.sin(angle) * spd - 1.5,
       life: 1,
-      maxLife: 1,
       color,
-      size: Math.random() * 6 + 3,
+      r: 3 + Math.random() * 4,
     });
   }
 }
 
+function addFloat(gs: GS, x: number, y: number, text: string, color: string) {
+  gs.floats.push({ id: gs.fid++, x, y, vy: -1.5, text, life: 1, color });
+}
+
 export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef<GameState>(initGame(0));
-  const animRef = useRef<number>(0);
-  const [displayScore, setDisplayScore] = useState(0);
-  const [displayPhase, setDisplayPhase] = useState<"menu" | "playing" | "dead">("menu");
-  const [displayHighScore, setDisplayHighScore] = useState(0);
-
-  const savedHighScore = useRef(
-    parseInt(localStorage.getItem("doodle_highscore") || "0", 10)
-  );
+  const gsRef = useRef<GS>(init(0));
+  const rafRef = useRef(0);
+  const hiRef = useRef(parseInt(localStorage.getItem("djhi") || "0", 10));
 
   const startGame = useCallback(() => {
-    stateRef.current = initGame(savedHighScore.current);
-    stateRef.current.phase = "playing";
-    setDisplayPhase("playing");
-    setDisplayScore(0);
+    const gs = init(hiRef.current);
+    gs.phase = "playing";
+    gsRef.current = gs;
   }, []);
 
   useEffect(() => {
-    stateRef.current = initGame(savedHighScore.current);
-    setDisplayHighScore(savedHighScore.current);
+    gsRef.current = init(hiRef.current);
 
-    const handleKey = (e: KeyboardEvent) => {
-      stateRef.current.keys[e.code] = e.type === "keydown";
-      if (
-        (e.code === "Space" || e.code === "Enter") &&
-        stateRef.current.phase === "menu"
-      ) {
-        startGame();
-      }
-      if (e.code === "Space" && stateRef.current.phase === "dead") {
-        startGame();
+    const onKey = (e: KeyboardEvent) => {
+      gsRef.current.keys[e.code] = e.type === "keydown";
+      if (e.type === "keydown" && (e.code === "Space" || e.code === "Enter")) {
+        if (gsRef.current.phase !== "playing") startGame();
       }
     };
-    window.addEventListener("keydown", handleKey);
-    window.addEventListener("keyup", handleKey);
-
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
     return () => {
-      window.removeEventListener("keydown", handleKey);
-      window.removeEventListener("keyup", handleKey);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
     };
   }, [startGame]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
 
-    function drawRoundRect(
-      x: number,
-      y: number,
-      w: number,
-      h: number,
-      r: number
-    ) {
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, r);
-      ctx.fill();
+    function toScreen(worldY: number) {
+      return worldY - gsRef.current.camY;
     }
 
-    function drawPlayer(state: GameState) {
-      const px = state.playerX;
-      const py = state.playerY - state.cameraY;
-      const squish = state.playerSquish;
-      const facing = state.playerFacing;
-      const anim = Math.sin(state.animFrame * 0.15) * 2;
+    // ─── DRAW BACKGROUND ─────────────────────────────────────────
+    function drawBg() {
+      ctx.fillStyle = "#f5f0e8";
+      ctx.fillRect(0, 0, W, H);
 
-      ctx.save();
-      ctx.translate(px + PLAYER_WIDTH / 2, py + PLAYER_HEIGHT / 2);
-      ctx.scale(facing, squish);
-
-      const bodyGrad = ctx.createRadialGradient(-4, -6, 2, 0, 0, 22);
-      bodyGrad.addColorStop(0, "#7effa0");
-      bodyGrad.addColorStop(0.5, "#2dba55");
-      bodyGrad.addColorStop(1, "#1a7a35");
-      ctx.fillStyle = bodyGrad;
-      ctx.beginPath();
-      ctx.ellipse(0, 2, 18, 20, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.ellipse(6, -4, 7, 6, 0.3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#222";
-      ctx.beginPath();
-      ctx.ellipse(8, -4, 4, 4, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.ellipse(10, -5.5, 1.5, 1.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#ff7070";
-      ctx.beginPath();
-      ctx.ellipse(3, 2, 5, 3, 0, 0, Math.PI);
-      ctx.fill();
-
-      ctx.fillStyle = "#e8f5a0";
-      ctx.beginPath();
-      ctx.ellipse(
-        -5 + anim * 0.3,
-        12 + Math.abs(anim) * 0.3,
-        6,
-        4,
-        -0.4,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(
-        7 - anim * 0.3,
-        12 + Math.abs(anim) * 0.3,
-        6,
-        4,
-        0.4,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-
-      ctx.restore();
-    }
-
-    function getPlatformColor(type: PlatformType): [string, string, string] {
-      switch (type) {
-        case "normal":
-          return ["#5ceb8a", "#28c55e", "#1a8a42"];
-        case "moving":
-          return ["#7db4ff", "#3a7de6", "#1a50c0"];
-        case "breakable":
-          return ["#ffb35c", "#e87a1a", "#a04800"];
-        case "spring":
-          return ["#ff6b9e", "#e0306e", "#8a0038"];
-        case "cloud":
-          return ["#d0e8ff", "#9fc8f5", "#6090c0"];
+      // Grid lines (notebook paper)
+      ctx.strokeStyle = "rgba(180,210,240,0.55)";
+      ctx.lineWidth = 1;
+      const gridSize = 28;
+      const offsetY = (gsRef.current.scrolled * 0.3) % gridSize;
+      for (let y = -gridSize + offsetY; y < H + gridSize; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
       }
+      for (let x = 0; x < W; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+      }
+
+      // Red margin line
+      ctx.strokeStyle = "rgba(220,100,100,0.3)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(48, 0);
+      ctx.lineTo(48, H);
+      ctx.stroke();
     }
 
-    function drawPlatform(p: Platform, cameraY: number) {
-      const py = p.y - cameraY;
-      if (py > CANVAS_HEIGHT + 20 || py < -20) return;
+    // ─── DRAW PLATFORM ───────────────────────────────────────────
+    function drawPlatform(p: Platform) {
+      const sy = toScreen(p.y);
+      if (sy > H + 30 || sy < -50) return;
 
-      const [light, mid, dark] = getPlatformColor(p.type);
-      const bouncePct = p.bounceAnim ? Math.abs(Math.sin(p.bounceAnim * 0.3)) : 0;
-      const scaleY = 1 + bouncePct * 0.4;
-      const scaleX = 1 - bouncePct * 0.1;
+      const bounce = p.bounceTimer > 0 ? Math.sin(p.bounceTimer * 0.6) * 5 : 0;
 
       ctx.save();
-      ctx.globalAlpha = p.opacity ?? 1;
-      ctx.translate(p.x + p.width / 2, py + p.height / 2);
-      ctx.scale(scaleX, scaleY);
-
-      const grad = ctx.createLinearGradient(
-        -p.width / 2,
-        -p.height / 2,
-        -p.width / 2,
-        p.height / 2
-      );
-      grad.addColorStop(0, light);
-      grad.addColorStop(0.5, mid);
-      grad.addColorStop(1, dark);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.roundRect(-p.width / 2, -p.height / 2, p.width, p.height, 7);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(255,255,255,0.35)";
-      ctx.beginPath();
-      ctx.roundRect(-p.width / 2 + 4, -p.height / 2 + 2, p.width - 8, 4, 3);
-      ctx.fill();
+      ctx.translate(p.x + p.w / 2, sy + p.h / 2 - bounce * 0.5);
 
       if (p.type === "spring") {
-        ctx.fillStyle = "#ffe000";
+        // Pink/red spring platform
+        const g = ctx.createLinearGradient(0, -p.h / 2, 0, p.h / 2);
+        g.addColorStop(0, "#ff8faa");
+        g.addColorStop(0.5, "#e8305a");
+        g.addColorStop(1, "#c01840");
+        ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.roundRect(-8, -p.height / 2 - 14, 16, 14, 4);
+        ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 7);
         ctx.fill();
-        ctx.fillStyle = "#ffaa00";
-        ctx.beginPath();
-        ctx.roundRect(-5, -p.height / 2 - 14, 10, 5, 3);
-        ctx.fill();
-      }
 
-      if (p.type === "cloud") {
-        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.strokeStyle = "#801030";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Spring coil
+        ctx.strokeStyle = "#ffd0e0";
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+        const coilH = 18 + bounce * 2;
+        for (let i = 0; i < 3; i++) {
+          const cy = -p.h / 2 - 6 - i * 7;
+          ctx.beginPath();
+          ctx.moveTo(-8, cy);
+          ctx.quadraticCurveTo(0, cy - 6, 8, cy);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = "#e8305a";
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.ellipse(0, -p.height / 2 - 8, 18, 10, 0, 0, Math.PI * 2);
+        ctx.moveTo(-6, -p.h / 2 - coilH);
+        ctx.lineTo(-6, -p.h / 2);
+        ctx.moveTo(6, -p.h / 2 - coilH);
+        ctx.lineTo(6, -p.h / 2);
+        ctx.stroke();
+
+      } else if (p.type === "broken" || p.cracked) {
+        // Brown crumbling platform
+        ctx.fillStyle = p.cracked ? "#a06830" : "#c87840";
+        ctx.strokeStyle = "#7a4818";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        // Crack lines
+        ctx.strokeStyle = "#7a4818";
+        ctx.lineWidth = 1.5;
+        if (p.cracked) {
+          ctx.globalAlpha = 1 - p.crackedTimer / 30;
+          ctx.beginPath();
+          ctx.moveTo(-p.w / 4, -p.h / 2);
+          ctx.lineTo(-p.w / 6, p.h / 2);
+          ctx.moveTo(p.w / 5, -p.h / 2 + 2);
+          ctx.lineTo(p.w / 3, p.h / 2);
+          ctx.moveTo(0, -p.h / 2);
+          ctx.lineTo(-p.w / 8, p.h / 2);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(-10, -p.h / 2 + 3);
+          ctx.lineTo(-5, p.h / 2 - 2);
+          ctx.moveTo(10, -p.h / 2 + 2);
+          ctx.lineTo(6, p.h / 2 - 3);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "rgba(255,200,140,0.3)";
+        ctx.fillRect(-p.w / 2 + 4, -p.h / 2 + 3, p.w - 8, 3);
+
+      } else if (p.type === "moving") {
+        // Blue platform
+        const g = ctx.createLinearGradient(0, -p.h / 2, 0, p.h / 2);
+        g.addColorStop(0, "#80c8ff");
+        g.addColorStop(0.5, "#2090e8");
+        g.addColorStop(1, "#0060b8");
+        ctx.fillStyle = g;
+        ctx.strokeStyle = "#004090";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 7);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.fillRect(-p.w / 2 + 5, -p.h / 2 + 3, p.w - 10, 4);
+
+        // Arrows indicating movement
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.font = "9px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(p.vx > 0 ? "▶▶" : "◀◀", 0, 3);
+
+      } else if (p.type === "disappear") {
+        // Cloud / disappearing
+        ctx.globalAlpha = p.used ? 0.3 : 1;
+        ctx.fillStyle = "#e8f8ff";
+        ctx.strokeStyle = "#90c8e8";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 7);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.beginPath();
+        ctx.ellipse(-p.w / 4, -p.h / 2 - 5, 12, 8, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.beginPath();
-        ctx.ellipse(-16, -p.height / 2 - 5, 12, 7, 0, 0, Math.PI * 2);
+        ctx.ellipse(p.w / 4, -p.h / 2 - 5, 12, 8, 0, 0, Math.PI * 2);
         ctx.fill();
+        ctx.globalAlpha = 1;
+
+      } else {
+        // Green normal platform
+        const g = ctx.createLinearGradient(0, -p.h / 2, 0, p.h / 2);
+        g.addColorStop(0, "#90e870");
+        g.addColorStop(0.5, "#38c020");
+        g.addColorStop(1, "#208010");
+        ctx.fillStyle = g;
+        ctx.strokeStyle = "#186010";
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.ellipse(16, -p.height / 2 - 5, 12, 7, 0, 0, Math.PI * 2);
+        ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 7);
         ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.fillRect(-p.w / 2 + 5, -p.h / 2 + 3, p.w - 10, 4);
       }
 
       ctx.restore();
     }
 
-    function drawEnemy(e: Enemy, cameraY: number) {
-      const ey = e.y - cameraY;
-      if (ey < -30 || ey > CANVAS_HEIGHT + 30) return;
+    // ─── DRAW DOODLER ────────────────────────────────────────────
+    function drawDoodler(gs: GS) {
+      const sx = gs.px;
+      const sy = toScreen(gs.py);
+      const f = gs.pface;
+      const t = gs.animT;
 
       ctx.save();
-      ctx.translate(e.x + e.width / 2, ey + e.height / 2);
+      ctx.translate(sx + PLAYER_W / 2, sy + PLAYER_H / 2);
+      ctx.scale(f, 1);
 
-      const phase = e.phase;
-      const bodyGrad = ctx.createRadialGradient(-4, -4, 2, 0, 0, 18);
-      bodyGrad.addColorStop(0, "#ff8888");
-      bodyGrad.addColorStop(0.5, "#dd2222");
-      bodyGrad.addColorStop(1, "#880000");
+      // Jetpack
+      if (gs.jetpack > 0) {
+        ctx.fillStyle = "#e04020";
+        ctx.fillRect(-26, -10, 10, 22);
+        ctx.fillStyle = "#ff8040";
+        const flameH = 8 + Math.sin(t * 0.5) * 5;
+        ctx.beginPath();
+        ctx.moveTo(-26, 12);
+        ctx.lineTo(-20, 12 + flameH);
+        ctx.lineTo(-16, 12);
+        ctx.fill();
+      }
+
+      // Body - the iconic Doodler shape
+      const bodyGrad = ctx.createRadialGradient(-4, -5, 3, 0, 0, 22);
+      bodyGrad.addColorStop(0, "#d4e870");
+      bodyGrad.addColorStop(0.5, "#a8c030");
+      bodyGrad.addColorStop(1, "#708010");
       ctx.fillStyle = bodyGrad;
+      ctx.strokeStyle = "#506010";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.ellipse(0, 0, 18, 16, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, 20, 22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Eyes - large white with pupils
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(8, -7, 8, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Pupil
+      const aimAngleAdj = gs.pface === 1 ? gs.aimAngle : Math.PI - gs.aimAngle;
+      const pDx = Math.cos(aimAngleAdj) * 3.5;
+      const pDy = Math.sin(aimAngleAdj) * 3.5;
+      ctx.fillStyle = "#1a1a2e";
+      ctx.beginPath();
+      ctx.ellipse(8 + pDx, -7 + pDy, 4, 4, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = "#222";
+      // Shine
+      ctx.fillStyle = "#fff";
       ctx.beginPath();
-      ctx.ellipse(-6, -4, 4, 4, 0, 0, Math.PI * 2);
+      ctx.ellipse(10 + pDx, -9 + pDy, 1.5, 1.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Nose
+      ctx.fillStyle = "#b8a060";
+      ctx.beginPath();
+      ctx.ellipse(14, -2, 4, 3, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Nostrils
+      ctx.fillStyle = "#806020";
+      ctx.beginPath();
+      ctx.ellipse(13, -2, 1.2, 1, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
-      ctx.ellipse(6, -4, 4, 4, 0, 0, Math.PI * 2);
+      ctx.ellipse(16, -1.5, 1.2, 1, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Gun / shooter arm
+      const armAngle = aimAngleAdj;
+      ctx.save();
+      ctx.translate(12, 2);
+      ctx.rotate(armAngle);
+      ctx.fillStyle = "#607030";
+      ctx.strokeStyle = "#304010";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(0, -4, 26, 8, 4);
+      ctx.fill();
+      ctx.stroke();
+      // Gun barrel
+      ctx.fillStyle = "#404020";
+      ctx.fillRect(20, -2.5, 8, 5);
+      ctx.restore();
+
+      // Feet
+      const legSwing = Math.sin(t * 0.2) * 8;
+      ctx.fillStyle = "#a0b828";
+      ctx.strokeStyle = "#506010";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(-6 + legSwing * 0.3, 20, 7, 5, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(8 - legSwing * 0.3, 20, 7, 5, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Hat if active
+      if (gs.hat > 0) {
+        ctx.fillStyle = "#4040dd";
+        ctx.beginPath();
+        ctx.ellipse(0, -22, 14, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(-10, -38, 20, 16);
+        ctx.fillStyle = "#8080ff";
+        ctx.fillRect(-10, -36, 20, 4);
+      }
+
+      ctx.restore();
+    }
+
+    // ─── DRAW BULLET ─────────────────────────────────────────────
+    function drawBullet(b: Bullet) {
+      const sy = toScreen(b.y);
+      ctx.save();
+      ctx.translate(b.x, sy);
+      ctx.rotate(Math.atan2(b.vy, b.vx));
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 8);
+      g.addColorStop(0, "#ffe860");
+      g.addColorStop(0.4, "#ff9010");
+      g.addColorStop(1, "rgba(255,100,0,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 12, 5, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#fff";
       ctx.beginPath();
-      ctx.ellipse(-5, -5, 1.5, 1.5, 0, 0, Math.PI * 2);
+      ctx.arc(0, 0, 3, 0, Math.PI * 2);
       ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(7, -5, 1.5, 1.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#ffaa00";
-      ctx.save();
-      ctx.rotate(Math.sin(phase * 0.05) * 0.3);
-      ctx.beginPath();
-      ctx.moveTo(-20, 0);
-      ctx.quadraticCurveTo(-28, -12, -22, -20);
-      ctx.quadraticCurveTo(-12, -28, -8, -16);
-      ctx.quadraticCurveTo(-6, -12, -18, -2);
-      ctx.fill();
-      ctx.restore();
-      ctx.save();
-      ctx.rotate(-Math.sin(phase * 0.05) * 0.3);
-      ctx.beginPath();
-      ctx.moveTo(20, 0);
-      ctx.quadraticCurveTo(28, -12, 22, -20);
-      ctx.quadraticCurveTo(12, -28, 8, -16);
-      ctx.quadraticCurveTo(6, -12, 18, -2);
-      ctx.fill();
-      ctx.restore();
-
       ctx.restore();
     }
 
-    function drawBackground(state: GameState) {
-      const hue = (state.bgHue + state.scrollY * 0.01) % 360;
-      const grad = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-      grad.addColorStop(0, `hsl(${hue}, 70%, 8%)`);
-      grad.addColorStop(0.4, `hsl(${(hue + 20) % 360}, 65%, 12%)`);
-      grad.addColorStop(1, `hsl(${(hue + 40) % 360}, 60%, 18%)`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    // ─── DRAW MONSTER ────────────────────────────────────────────
+    function drawMonster(m: Monster) {
+      const sy = toScreen(m.y);
+      if (sy > H + 40 || sy < -50) return;
+      ctx.save();
+      ctx.translate(m.x + m.w / 2, sy + m.h / 2);
 
-      state.stars.forEach((star) => {
-        const twinkle = 0.5 + 0.5 * Math.sin(star.twinkle + state.animFrame * 0.03);
-        ctx.globalAlpha = 0.3 + 0.7 * twinkle;
-        ctx.fillStyle = `hsl(${(hue + 60) % 360}, 80%, 90%)`;
+      if (m.type === "worm") {
+        ctx.scale(m.vx > 0 ? 1 : -1, 1);
+        const g = ctx.createRadialGradient(-5, -5, 2, 0, 0, 22);
+        g.addColorStop(0, "#ff8888");
+        g.addColorStop(0.5, "#dd2020");
+        g.addColorStop(1, "#880808");
+        ctx.fillStyle = g;
+        ctx.strokeStyle = "#660000";
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+        ctx.ellipse(0, 0, 22, 14, 0, 0, Math.PI * 2);
         ctx.fill();
-      });
-      ctx.globalAlpha = 1;
+        ctx.stroke();
+        // Eyes
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.ellipse(12, -5, 5, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#111";
+        ctx.beginPath();
+        ctx.ellipse(13, -5, 3, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.ellipse(14, -6, 1, 1, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Spikes
+        ctx.fillStyle = "#cc0000";
+        for (let i = -2; i <= 2; i++) {
+          ctx.beginPath();
+          ctx.moveTo(i * 8, -14);
+          ctx.lineTo(i * 8 - 5, -5);
+          ctx.lineTo(i * 8 + 5, -5);
+          ctx.fill();
+        }
+
+      } else if (m.type === "ufo") {
+        // UFO disc
+        const gDisc = ctx.createLinearGradient(0, -m.h / 2, 0, m.h / 2);
+        gDisc.addColorStop(0, "#d0d0ff");
+        gDisc.addColorStop(0.5, "#8080dd");
+        gDisc.addColorStop(1, "#4040aa");
+        ctx.fillStyle = gDisc;
+        ctx.strokeStyle = "#2020aa";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(0, 4, 26, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        // Dome
+        ctx.fillStyle = "rgba(180,255,200,0.7)";
+        ctx.strokeStyle = "#60cc80";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(0, -2, 14, 12, 0, Math.PI, 0);
+        ctx.fill();
+        ctx.stroke();
+        // Lights
+        const phase = m.frame * 0.1;
+        const lightColors = ["#ff4040", "#40ff40", "#4040ff", "#ffff40"];
+        for (let i = 0; i < 4; i++) {
+          const angle = (i / 4) * Math.PI * 2 + phase;
+          ctx.fillStyle = lightColors[i];
+          ctx.beginPath();
+          ctx.arc(Math.cos(angle) * 18, 6 + Math.sin(angle) * 3, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+      } else {
+        // Bat
+        ctx.scale(m.vx > 0 ? 1 : -1, 1);
+        const wingFlap = Math.sin(m.frame * 0.25) * 0.4;
+        // Wings
+        ctx.fillStyle = "#553388";
+        ctx.strokeStyle = "#221133";
+        ctx.lineWidth = 1.5;
+        ctx.save();
+        ctx.rotate(-wingFlap);
+        ctx.beginPath();
+        ctx.moveTo(-5, 0);
+        ctx.quadraticCurveTo(-30, -20, -38, 5);
+        ctx.quadraticCurveTo(-28, 8, -5, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        ctx.save();
+        ctx.rotate(wingFlap);
+        ctx.beginPath();
+        ctx.moveTo(5, 0);
+        ctx.quadraticCurveTo(30, -20, 38, 5);
+        ctx.quadraticCurveTo(28, 8, 5, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        // Body
+        ctx.fillStyle = "#442266";
+        ctx.strokeStyle = "#221133";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(0, 2, 13, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        // Eyes
+        ctx.fillStyle = "#ff2222";
+        ctx.beginPath();
+        ctx.arc(-5, -1, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(5, -1, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#111";
+        ctx.beginPath();
+        ctx.arc(-4, -1, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(6, -1, 2, 0, Math.PI * 2);
+        ctx.fill();
+        // Fangs
+        ctx.fillStyle = "#fffbe8";
+        ctx.beginPath();
+        ctx.moveTo(-3, 10);
+        ctx.lineTo(-6, 17);
+        ctx.lineTo(0, 10);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(3, 10);
+        ctx.lineTo(6, 17);
+        ctx.lineTo(0, 10);
+        ctx.fill();
+      }
+
+      // HP dots
+      for (let i = 0; i < m.hp; i++) {
+        ctx.fillStyle = "#ff4040";
+        ctx.beginPath();
+        ctx.arc(-6 + i * 8, -m.h / 2 - 8, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
     }
 
-    function drawParticles(state: GameState) {
-      state.particles.forEach((p) => {
-        const alpha = p.life / p.maxLife;
-        ctx.globalAlpha = alpha;
+    // ─── DRAW AIM LINE ───────────────────────────────────────────
+    function drawAimLine(gs: GS) {
+      if (gs.phase !== "playing") return;
+      const sx = gs.px + PLAYER_W / 2;
+      const sy = toScreen(gs.py + PLAYER_H / 2);
+      const angle = gs.pface === 1 ? gs.aimAngle : Math.PI - gs.aimAngle;
+      const len = 55;
+      const ex = sx + Math.cos(angle) * len;
+      const ey = sy + Math.sin(angle) * len;
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,180,0,0.6)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.lineDashOffset = -(gs.frameN * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    // ─── DRAW HUD ────────────────────────────────────────────────
+    function drawHUD(gs: GS) {
+      ctx.save();
+
+      // Score - hand-drawn font style
+      ctx.font = "bold 28px 'Segoe Script', 'Comic Sans MS', cursive";
+      ctx.fillStyle = "#1a1a2e";
+      ctx.textAlign = "left";
+      ctx.fillText(gs.score.toString(), 60, 42);
+
+      if (gs.jetpack > 0) {
+        ctx.font = "bold 14px 'Comic Sans MS', cursive";
+        ctx.fillStyle = "#e04020";
+        ctx.fillText("🚀 " + Math.ceil(gs.jetpack / 60) + "s", 60, 65);
+      }
+      if (gs.hat > 0) {
+        ctx.font = "bold 14px 'Comic Sans MS', cursive";
+        ctx.fillStyle = "#4040dd";
+        ctx.fillText("🎩 " + Math.ceil(gs.hat / 60) + "s", 60, 65);
+      }
+
+      // Best score top-right
+      ctx.textAlign = "right";
+      ctx.font = "bold 14px 'Comic Sans MS', cursive";
+      ctx.fillStyle = "#555";
+      ctx.fillText("Best: " + gs.hi, W - 10, 42);
+
+      // Controls hint (fades out)
+      if (gs.scrolled < 200) {
+        const alpha = Math.max(0, 1 - gs.scrolled / 200);
+        ctx.globalAlpha = alpha * 0.6;
+        ctx.font = "12px 'Comic Sans MS', cursive";
+        ctx.fillStyle = "#888";
+        ctx.textAlign = "center";
+        ctx.fillText("← → move  |  click/tap to shoot", W / 2, H - 12);
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.restore();
+    }
+
+    // ─── DRAW MENU ───────────────────────────────────────────────
+    function drawMenu(gs: GS) {
+      const t = gs.frameN;
+
+      // Semi-transparent overlay
+      ctx.fillStyle = "rgba(245,240,232,0.92)";
+      ctx.fillRect(0, 0, W, H);
+
+      // Title with hand-drawn style
+      ctx.save();
+      ctx.textAlign = "center";
+
+      // Title shadow
+      ctx.fillStyle = "#38c020";
+      ctx.font = "bold 62px 'Segoe Script', 'Comic Sans MS', cursive";
+      ctx.fillText("Doodle", W / 2 + 3, 153);
+      ctx.fillText("Jump", W / 2 + 3, 223);
+
+      // Title main
+      ctx.fillStyle = "#2a9010";
+      ctx.fillText("Doodle", W / 2, 150);
+      ctx.fillText("Jump", W / 2, 220);
+
+      // Subtitle
+      ctx.font = "16px 'Comic Sans MS', cursive";
+      ctx.fillStyle = "#888";
+      ctx.fillText("Ultra Edition", W / 2, 248);
+
+      // Play button
+      const pulse = 1 + Math.sin(t * 0.08) * 0.04;
+      ctx.save();
+      ctx.translate(W / 2, 310);
+      ctx.scale(pulse, pulse);
+      const btnGrad = ctx.createLinearGradient(-85, -24, 85, 24);
+      btnGrad.addColorStop(0, "#50e030");
+      btnGrad.addColorStop(1, "#20b000");
+      ctx.fillStyle = btnGrad;
+      ctx.strokeStyle = "#186010";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(-85, -24, 170, 48, 14);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 22px 'Comic Sans MS', cursive";
+      ctx.fillText("PLAY!", 0, 9);
+      ctx.restore();
+
+      // Instructions
+      ctx.font = "13px 'Comic Sans MS', cursive";
+      ctx.fillStyle = "#666";
+      ctx.fillText("Use ← → keys or touch to move", W / 2, 370);
+      ctx.fillText("Click / tap to shoot monsters", W / 2, 392);
+
+      if (gs.hi > 0) {
+        ctx.font = "bold 15px 'Comic Sans MS', cursive";
+        ctx.fillStyle = "#c87820";
+        ctx.fillText("Best: " + gs.hi.toLocaleString(), W / 2, 430);
+      }
+
+      ctx.restore();
+    }
+
+    // ─── DRAW GAME OVER ──────────────────────────────────────────
+    function drawGameOver(gs: GS) {
+      ctx.fillStyle = "rgba(245,240,232,0.88)";
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.save();
+      ctx.textAlign = "center";
+
+      ctx.fillStyle = "#cc1111";
+      ctx.font = "bold 52px 'Segoe Script', 'Comic Sans MS', cursive";
+      ctx.fillText("Game", W / 2, 200);
+      ctx.fillText("Over!", W / 2, 262);
+
+      ctx.fillStyle = "#333";
+      ctx.font = "22px 'Comic Sans MS', cursive";
+      ctx.fillText("Score: " + gs.score.toLocaleString(), W / 2, 308);
+
+      if (gs.score >= gs.hi) {
+        const t = gs.frameN;
+        ctx.fillStyle = `hsl(${(t * 4) % 360}, 90%, 45%)`;
+        ctx.font = "bold 18px 'Comic Sans MS', cursive";
+        ctx.fillText("New High Score!", W / 2, 338);
+      } else {
+        ctx.fillStyle = "#c87820";
+        ctx.font = "bold 16px 'Comic Sans MS', cursive";
+        ctx.fillText("Best: " + gs.hi.toLocaleString(), W / 2, 338);
+      }
+
+      const t = gs.frameN;
+      const pulse = 0.7 + 0.3 * Math.sin(t * 0.1);
+      ctx.globalAlpha = pulse;
+      const btnGrad = ctx.createLinearGradient(W / 2 - 80, 370, W / 2 + 80, 418);
+      btnGrad.addColorStop(0, "#8030cc");
+      btnGrad.addColorStop(1, "#e020a0");
+      ctx.fillStyle = btnGrad;
+      ctx.strokeStyle = "#501888";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(W / 2 - 80, 370, 160, 48, 14);
+      ctx.fill();
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 20px 'Comic Sans MS', cursive";
+      ctx.fillText("Play Again", W / 2, 401);
+
+      ctx.fillStyle = "#999";
+      ctx.font = "13px 'Comic Sans MS', cursive";
+      ctx.fillText("Space / click to restart", W / 2, 448);
+
+      ctx.restore();
+    }
+
+    // ─── DRAW PARTICLES ──────────────────────────────────────────
+    function drawParticles(gs: GS) {
+      gs.particles.forEach((p) => {
+        const sy = toScreen(p.y);
+        ctx.globalAlpha = p.life;
         ctx.fillStyle = p.color;
         ctx.beginPath();
-        ctx.arc(
-          p.x,
-          p.y - state.cameraY,
-          p.size * alpha,
-          0,
-          Math.PI * 2
-        );
+        ctx.arc(p.x, sy, p.r * p.life, 0, Math.PI * 2);
         ctx.fill();
       });
       ctx.globalAlpha = 1;
     }
 
-    function drawHUD(state: GameState) {
-      ctx.save();
-
-      ctx.fillStyle = "rgba(0,0,0,0.4)";
-      drawRoundRect(8, 8, 120, 38, 10);
-
-      ctx.font = "bold 11px 'Segoe UI', sans-serif";
-      ctx.fillStyle = "#aaffcc";
-      ctx.textAlign = "left";
-      ctx.fillText("SCORE", 16, 22);
-      ctx.font = "bold 18px 'Segoe UI', sans-serif";
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(state.score.toLocaleString(), 16, 40);
-
-      ctx.fillStyle = "rgba(0,0,0,0.4)";
-      drawRoundRect(CANVAS_WIDTH - 128, 8, 120, 38, 10);
-      ctx.font = "bold 11px 'Segoe UI', sans-serif";
-      ctx.fillStyle = "#ffd700";
-      ctx.textAlign = "right";
-      ctx.fillText("BEST", CANVAS_WIDTH - 16, 22);
-      ctx.font = "bold 18px 'Segoe UI', sans-serif";
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(state.highScore.toLocaleString(), CANVAS_WIDTH - 16, 40);
-
-      ctx.restore();
-    }
-
-    function drawMenu(state: GameState) {
-      ctx.save();
-
-      const t = state.animFrame;
-
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      drawRoundRect(30, 100, CANVAS_WIDTH - 60, 360, 24);
-
-      const titleGrad = ctx.createLinearGradient(0, 130, 0, 180);
-      titleGrad.addColorStop(0, "#00ffcc");
-      titleGrad.addColorStop(0.5, "#7effa0");
-      titleGrad.addColorStop(1, "#00ddff");
-      ctx.fillStyle = titleGrad;
-      ctx.font = "bold 54px 'Segoe UI', Impact, sans-serif";
-      ctx.textAlign = "center";
-      ctx.shadowColor = "#00ffcc";
-      ctx.shadowBlur = 20 + 10 * Math.sin(t * 0.05);
-      ctx.fillText("DOODLE", CANVAS_WIDTH / 2, 175);
-      ctx.fillText("JUMP", CANVAS_WIDTH / 2, 230);
-      ctx.shadowBlur = 0;
-
-      ctx.fillStyle = "rgba(255,255,255,0.12)";
-      ctx.font = "14px 'Segoe UI', sans-serif";
-      ctx.fillText("~ Ultra Edition ~", CANVAS_WIDTH / 2, 255);
-
-      const pulseAlpha = 0.7 + 0.3 * Math.sin(t * 0.08);
-      ctx.globalAlpha = pulseAlpha;
-      const btnGrad = ctx.createLinearGradient(
-        CANVAS_WIDTH / 2 - 90,
-        290,
-        CANVAS_WIDTH / 2 + 90,
-        330
-      );
-      btnGrad.addColorStop(0, "#2dba55");
-      btnGrad.addColorStop(1, "#00aaff");
-      ctx.fillStyle = btnGrad;
-      drawRoundRect(CANVAS_WIDTH / 2 - 90, 285, 180, 48, 14);
+    // ─── DRAW FLOATING TEXTS ────────────────────────────────────
+    function drawFloats(gs: GS) {
+      gs.floats.forEach((f) => {
+        const sy = toScreen(f.y);
+        ctx.globalAlpha = f.life;
+        ctx.fillStyle = f.color;
+        ctx.font = "bold 16px 'Comic Sans MS', cursive";
+        ctx.textAlign = "center";
+        ctx.fillText(f.text, f.x, sy);
+      });
       ctx.globalAlpha = 1;
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 18px 'Segoe UI', sans-serif";
-      ctx.fillText("PLAY NOW", CANVAS_WIDTH / 2, 315);
-
-      ctx.font = "13px 'Segoe UI', sans-serif";
-      ctx.fillStyle = "rgba(200,220,255,0.8)";
-      ctx.fillText("← → or A/D to move", CANVAS_WIDTH / 2, 360);
-      ctx.fillText("Touch left/right to move on mobile", CANVAS_WIDTH / 2, 378);
-      ctx.fillText("Jump on platforms!", CANVAS_WIDTH / 2, 396);
-
-      if (state.highScore > 0) {
-        ctx.fillStyle = "#ffd700";
-        ctx.font = "bold 15px 'Segoe UI', sans-serif";
-        ctx.fillText(
-          `Best: ${state.highScore.toLocaleString()}`,
-          CANVAS_WIDTH / 2,
-          425
-        );
-      }
-
-      ctx.restore();
     }
 
-    function drawGameOver(state: GameState) {
-      ctx.save();
+    // ─── RENDER ──────────────────────────────────────────────────
+    function render() {
+      const gs = gsRef.current;
+      ctx.clearRect(0, 0, W, H);
 
-      ctx.fillStyle = "rgba(0,0,0,0.7)";
-      drawRoundRect(30, 140, CANVAS_WIDTH - 60, 300, 24);
+      drawBg();
 
-      ctx.textAlign = "center";
-      ctx.font = "bold 48px 'Segoe UI', Impact, sans-serif";
-      const deathGrad = ctx.createLinearGradient(0, 150, 0, 200);
-      deathGrad.addColorStop(0, "#ff6b6b");
-      deathGrad.addColorStop(1, "#ff0044");
-      ctx.fillStyle = deathGrad;
-      ctx.shadowColor = "#ff0044";
-      ctx.shadowBlur = 15;
-      ctx.fillText("GAME OVER", CANVAS_WIDTH / 2, 200);
-      ctx.shadowBlur = 0;
-
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "22px 'Segoe UI', sans-serif";
-      ctx.fillText(`Score: ${state.score.toLocaleString()}`, CANVAS_WIDTH / 2, 245);
-
-      if (state.score >= state.highScore) {
-        const t = state.animFrame;
-        ctx.fillStyle = `hsl(${(t * 3) % 360}, 100%, 65%)`;
-        ctx.font = "bold 16px 'Segoe UI', sans-serif";
-        ctx.fillText("NEW HIGH SCORE!", CANVAS_WIDTH / 2, 275);
-      } else {
-        ctx.fillStyle = "#ffd700";
-        ctx.font = "16px 'Segoe UI', sans-serif";
-        ctx.fillText(`Best: ${state.highScore.toLocaleString()}`, CANVAS_WIDTH / 2, 275);
-      }
-
-      const t = state.animFrame;
-      const pulseAlpha = 0.7 + 0.3 * Math.sin(t * 0.08);
-      ctx.globalAlpha = pulseAlpha;
-      const btnGrad = ctx.createLinearGradient(
-        CANVAS_WIDTH / 2 - 80,
-        310,
-        CANVAS_WIDTH / 2 + 80,
-        350
-      );
-      btnGrad.addColorStop(0, "#7b2dba");
-      btnGrad.addColorStop(1, "#e030a0");
-      ctx.fillStyle = btnGrad;
-      drawRoundRect(CANVAS_WIDTH / 2 - 80, 305, 160, 48, 14);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 18px 'Segoe UI', sans-serif";
-      ctx.fillText("PLAY AGAIN", CANVAS_WIDTH / 2, 335);
-
-      ctx.fillStyle = "rgba(200,200,255,0.7)";
-      ctx.font = "13px 'Segoe UI', sans-serif";
-      ctx.fillText("Space / Click to restart", CANVAS_WIDTH / 2, 380);
-
-      ctx.restore();
-    }
-
-    function update(state: GameState) {
-      if (state.phase !== "playing") {
-        state.animFrame++;
+      if (gs.phase === "menu") {
+        gs.platforms.forEach(drawPlatform);
+        drawDoodler(gs);
+        drawMenu(gs);
         return;
       }
 
-      state.animFrame++;
+      gs.platforms.forEach(drawPlatform);
+      gs.powerups.forEach((pu) => {
+        if (pu.collected) return;
+        const sy = toScreen(pu.y);
+        ctx.save();
+        ctx.translate(pu.x + 15, sy + 15);
+        const t = gs.frameN;
+        ctx.rotate(Math.sin(t * 0.05) * 0.2);
+        if (pu.type === "jetpack") {
+          ctx.fillStyle = "#e04020";
+          ctx.fillRect(-10, -15, 20, 30);
+          ctx.fillStyle = "#ff8040";
+          ctx.fillRect(-6, -18, 12, 8);
+          ctx.fillStyle = "#ffcc00";
+          const fh = 8 + Math.sin(t * 0.3) * 4;
+          ctx.beginPath();
+          ctx.moveTo(-8, 15);
+          ctx.lineTo(0, 15 + fh);
+          ctx.lineTo(8, 15);
+          ctx.fill();
+        } else {
+          ctx.fillStyle = "#4040dd";
+          ctx.beginPath();
+          ctx.ellipse(0, 5, 15, 4, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillRect(-10, -10, 20, 15);
+          ctx.fillStyle = "#8888ff";
+          ctx.fillRect(-10, -8, 20, 4);
+        }
+        ctx.restore();
+      });
 
-      const keys = state.keys;
-      const left =
-        keys["ArrowLeft"] ||
-        keys["KeyA"] ||
-        keys["Left"];
-      const right =
-        keys["ArrowRight"] ||
-        keys["KeyD"] ||
-        keys["Right"];
+      drawParticles(gs);
+      gs.bullets.forEach(drawBullet);
+      gs.monsters.forEach(drawMonster);
+      drawAimLine(gs);
+      drawDoodler(gs);
+      drawFloats(gs);
+      drawHUD(gs);
+
+      if (gs.phase === "dead") drawGameOver(gs);
+    }
+
+    // ─── UPDATE ──────────────────────────────────────────────────
+    function update() {
+      const gs = gsRef.current;
+      gs.frameN++;
+      gs.animT++;
+
+      if (gs.phase !== "playing") return;
+
+      const left = gs.keys["ArrowLeft"] || gs.keys["KeyA"];
+      const right = gs.keys["ArrowRight"] || gs.keys["KeyD"];
 
       if (left) {
-        state.playerVX -= 1;
-        state.playerFacing = -1;
+        gs.pvx = Math.max(gs.pvx - 1.2, -MOVE_SPEED * 1.5);
+        gs.pface = -1;
       } else if (right) {
-        state.playerVX += 1;
-        state.playerFacing = 1;
+        gs.pvx = Math.min(gs.pvx + 1.2, MOVE_SPEED * 1.5);
+        gs.pface = 1;
       } else {
-        state.playerVX *= 0.85;
+        gs.pvx *= 0.82;
       }
 
-      state.playerVX = Math.max(-PLAYER_SPEED * 1.5, Math.min(PLAYER_SPEED * 1.5, state.playerVX));
+      gs.px += gs.pvx;
+      if (gs.px > W) gs.px = -PLAYER_W;
+      if (gs.px + PLAYER_W < 0) gs.px = W;
 
-      state.playerX += state.playerVX;
-
-      if (state.playerX > CANVAS_WIDTH) state.playerX = -PLAYER_WIDTH;
-      if (state.playerX + PLAYER_WIDTH < 0) state.playerX = CANVAS_WIDTH;
-
-      state.playerVY += GRAVITY;
-      state.playerY += state.playerVY;
-
-      state.playerSquish = 1 + state.playerVY * 0.01;
-
-      const screenPlayerY = state.playerY - state.cameraY;
-      if (screenPlayerY < SCROLL_THRESHOLD) {
-        const scrollAmount = SCROLL_THRESHOLD - screenPlayerY;
-        state.cameraY -= scrollAmount;
-        state.scrollY += scrollAmount;
-        state.score = Math.max(state.score, Math.floor(state.scrollY / 5));
-
-        state.stars.forEach((star) => {
-          star.y += scrollAmount * star.speed * 0.4;
-          if (star.y > CANVAS_HEIGHT) {
-            star.y = 0;
-            star.x = Math.random() * CANVAS_WIDTH;
-          }
-        });
-
-        state.bgHue = (220 + state.scrollY * 0.015) % 360;
+      // Gravity / jetpack
+      if (gs.jetpack > 0) {
+        gs.jetpack--;
+        gs.pvy = Math.max(gs.pvy - 0.6, -11);
+        addParticles(gs, gs.px + PLAYER_W / 2, gs.py + PLAYER_H, "#ff8040", 1);
+      } else if (gs.hat > 0) {
+        gs.hat--;
+        gs.pvy = Math.max(gs.pvy - 0.3, -7);
+      } else {
+        gs.pvy += GRAVITY;
       }
 
-      if (state.playerVY > 0) {
-        for (const p of state.platforms) {
-          if (p.broken) continue;
-          const px = state.playerX;
-          const py = state.playerY;
-          const prevPY = py - state.playerVY;
+      gs.py += gs.pvy;
 
-          const onTop =
-            px + PLAYER_WIDTH > p.x + 4 &&
-            px < p.x + p.width - 4 &&
-            prevPY + PLAYER_HEIGHT <= p.y + 4 &&
-            py + PLAYER_HEIGHT >= p.y &&
-            py + PLAYER_HEIGHT <= p.y + p.height + 8;
+      // Camera scroll
+      const screenPY = gs.py - gs.camY;
+      if (screenPY < H / 2.5) {
+        const d = H / 2.5 - screenPY;
+        gs.camY -= d;
+        gs.scrolled += d;
+        gs.score = Math.max(gs.score, Math.floor(gs.scrolled / 4));
+      }
 
-          if (onTop) {
-            const now = Date.now();
-            if (now - state.lastJumpTime < 600) state.jumpCombo++;
-            else state.jumpCombo = 0;
-            state.lastJumpTime = now;
+      // Platform collisions (only when falling)
+      if (gs.pvy > 0) {
+        for (const p of gs.platforms) {
+          const prevPy = gs.py - gs.pvy;
+          const overlapsX = gs.px + 8 < p.x + p.w - 8 && gs.px + PLAYER_W - 8 > p.x + 8;
+          const landedOn = prevPy + PLAYER_H <= p.y + 4 && gs.py + PLAYER_H >= p.y && gs.py + PLAYER_H <= p.y + p.h + 12;
 
-            if (p.type === "breakable") {
-              p.broken = true;
-              spawnParticles(
-                state,
-                p.x + p.width / 2,
-                p.y,
-                "#ff9020",
-                12
-              );
-            } else if (p.type === "spring") {
-              state.playerVY = JUMP_FORCE * 1.7;
-              p.bounceAnim = 10;
-              spawnParticles(
-                state,
-                p.x + p.width / 2,
-                p.y,
-                "#ff6bbb",
-                8
-              );
+          if (overlapsX && landedOn) {
+            if (p.type === "broken") {
+              if (!p.cracked) {
+                p.cracked = true;
+                p.crackedTimer = 0;
+              } else {
+                continue;
+              }
+            }
+            if (p.type === "disappear") {
+              p.used = true;
+            }
+            if (p.type === "spring") {
+              gs.pvy = SPRING_JUMP;
+              p.bounceTimer = 12;
+              addParticles(gs, p.x + p.w / 2, p.y, "#ff6090", 8);
+              addFloat(gs, p.x + p.w / 2, p.y - 20, "BOING!", "#e8305a");
             } else {
-              state.playerVY = JUMP_FORCE;
-              p.bounceAnim = 8;
-              spawnParticles(
-                state,
-                p.x + p.width / 2,
-                p.y,
-                p.type === "moving" ? "#4a9fff" : "#5ceb8a",
-                4
-              );
+              gs.pvy = BASE_JUMP;
+              p.bounceTimer = 8;
+              if (p.type !== "disappear") {
+                addParticles(gs, p.x + p.w / 2, p.y, "#70dd40", 4);
+              }
             }
-
-            if (p.type !== "cloud") {
-              break;
-            }
+            gs.py = p.y - PLAYER_H;
+            break;
           }
         }
       }
 
-      state.platforms.forEach((p) => {
-        if (p.bounceAnim && p.bounceAnim > 0) p.bounceAnim--;
-        if (p.type === "moving" && p.vx !== undefined) {
+      // Update platforms
+      gs.platforms.forEach((p) => {
+        if (p.bounceTimer > 0) p.bounceTimer--;
+        if (p.type === "moving") {
           p.x += p.vx;
-          if (p.x <= 0 || p.x + p.width >= CANVAS_WIDTH) p.vx! *= -1;
+          if (p.x <= 0 || p.x + p.w >= W) p.vx *= -1;
         }
-        if (p.broken) {
-          p.opacity = Math.max(0, (p.opacity ?? 1) - 0.05);
+        if (p.cracked) {
+          p.crackedTimer++;
         }
       });
 
-      state.platforms = state.platforms.filter(
-        (p) => p.y - state.cameraY < CANVAS_HEIGHT + 20 && !(p.broken && (p.opacity ?? 1) <= 0)
+      // Remove off-screen / crumbled platforms
+      gs.platforms = gs.platforms.filter(
+        (p) => {
+          if (p.cracked && p.crackedTimer > 28) return false;
+          if (p.used && p.type === "disappear") return false;
+          return toScreen(p.y) < H + 30;
+        }
       );
 
-      const highestPlatformY = Math.min(
-        ...state.platforms.filter((p) => !p.broken).map((p) => p.y)
-      );
-
-      const minPlatformsOnScreen = state.platforms.filter(
-        (p) => p.y - state.cameraY < CANVAS_HEIGHT
-      ).length;
-
-      while (
-        minPlatformsOnScreen < PLATFORM_COUNT ||
-        highestPlatformY - state.cameraY > 50
-      ) {
-        const topY =
-          state.platforms.length === 0
-            ? state.cameraY
-            : Math.min(...state.platforms.map((p) => p.y));
-        const gap = 40 + Math.random() * 30;
-        const newP = makePlatform(
-          state.platformIdCounter++,
-          0,
-          topY - gap,
-          state.score
-        );
-        state.platforms.push(newP);
+      // Generate platforms
+      const topY = gs.platforms.length ? Math.min(...gs.platforms.map((p) => p.y)) : gs.camY;
+      while (gs.platforms.length < 22 || topY > gs.camY - 80) {
+        const highest = gs.platforms.length ? Math.min(...gs.platforms.map((p) => p.y)) : gs.camY;
+        gs.platforms.push(makePlat(gs.pid++, 0, highest - platGap(gs.score), gs.score));
         break;
       }
 
-      if (
-        state.score > 500 &&
-        state.enemies.length < Math.floor(state.score / 1500) + 1 &&
-        Math.random() < 0.003
-      ) {
-        const spawnY = state.cameraY - 50;
-        state.enemies.push({
-          id: state.enemyIdCounter++,
-          x: Math.random() * (CANVAS_WIDTH - 40),
-          y: spawnY,
-          vx: Math.random() > 0.5 ? 1.5 : -1.5,
-          width: 36,
-          height: 32,
-          alive: true,
-          phase: 0,
+      // Powerup collisions
+      gs.powerups.forEach((pu) => {
+        if (pu.collected) return;
+        const dx = gs.px + PLAYER_W / 2 - (pu.x + 15);
+        const dy = (gs.py + PLAYER_H / 2) - (pu.y + 15);
+        if (Math.abs(dx) < 28 && Math.abs(dy) < 28) {
+          pu.collected = true;
+          if (pu.type === "jetpack") {
+            gs.jetpack = 180;
+            addFloat(gs, gs.px + PLAYER_W / 2, gs.py, "JETPACK!", "#e04020");
+          } else {
+            gs.hat = 300;
+            addFloat(gs, gs.px + PLAYER_W / 2, gs.py, "PROPELLER!", "#4040dd");
+          }
+          addParticles(gs, pu.x + 15, pu.y + 15, "#ffcc00", 12);
+        }
+      });
+      gs.powerups = gs.powerups.filter((pu) => !pu.collected && toScreen(pu.y) < H + 30);
+
+      // Spawn powerups occasionally
+      if (gs.score > 200 && Math.random() < 0.0008) {
+        const tY = gs.camY - 100 - Math.random() * 150;
+        gs.powerups.push({
+          id: gs.puid++,
+          x: Math.random() * (W - 40),
+          y: tY,
+          type: Math.random() < 0.5 ? "jetpack" : "hat",
+          collected: false,
         });
       }
 
-      state.enemies.forEach((e) => {
-        if (!e.alive) return;
-        e.x += e.vx;
-        e.phase++;
-        if (e.x <= 0 || e.x + e.width >= CANVAS_WIDTH) e.vx *= -1;
+      // Bullets
+      gs.bullets = gs.bullets.filter((b) => {
+        b.x += b.vx;
+        b.y += b.vy;
+        const sy = toScreen(b.y);
+        return sy > -50 && sy < H + 50;
+      });
 
-        const ey = e.y - state.cameraY;
-        if (ey > CANVAS_HEIGHT + 50) {
-          e.alive = false;
-          return;
+      // Shoot cooldown
+      if (gs.shootCooldown > 0) gs.shootCooldown--;
+
+      // Monsters
+      const toSpawn = gs.score > 300 && gs.monsters.filter((m) => m.alive).length < Math.min(Math.floor(gs.score / 800) + 1, 4);
+      if (toSpawn && Math.random() < 0.004) {
+        gs.monsters.push(makeMonster(gs.mid++, gs.camY, gs.score));
+      }
+
+      gs.monsters.forEach((m) => {
+        if (!m.alive) return;
+        m.x += m.vx;
+        m.frame++;
+        if (m.x <= 0 || m.x + m.w >= W) m.vx *= -1;
+        if (m.type === "ufo") {
+          m.y += Math.sin(m.frame * 0.04) * 0.8;
+        }
+        if (m.type === "bat") {
+          m.y += Math.sin(m.frame * 0.06) * 1.2 - 0.1;
         }
 
-        const playerCollide =
-          state.playerX + 6 < e.x + e.width - 6 &&
-          state.playerX + PLAYER_WIDTH - 6 > e.x + 6 &&
-          state.playerY + 6 < e.y + e.height - 6 &&
-          state.playerY + PLAYER_HEIGHT - 6 > e.y + 6;
-
-        if (playerCollide) {
-          if (state.playerVY > 0 && state.playerY + PLAYER_HEIGHT < e.y + e.height - 10) {
-            e.alive = false;
-            state.playerVY = JUMP_FORCE;
-            state.score += 100;
-            spawnParticles(state, e.x + e.width / 2, e.y + e.height / 2, "#ff4444", 14);
-          } else {
-            state.phase = "dead";
-            if (state.score > savedHighScore.current) {
-              savedHighScore.current = state.score;
-              localStorage.setItem("doodle_highscore", String(state.score));
-              state.highScore = state.score;
+        // Bullet hits monster
+        gs.bullets.forEach((b) => {
+          const bsy = b.y;
+          if (
+            b.x > m.x && b.x < m.x + m.w &&
+            bsy > m.y && bsy < m.y + m.h
+          ) {
+            m.hp--;
+            addParticles(gs, b.x, b.y, "#ff3030", 6);
+            b.vy = 1e9; // remove bullet
+            if (m.hp <= 0) {
+              m.alive = false;
+              addParticles(gs, m.x + m.w / 2, m.y + m.h / 2, "#ff6030", 16);
+              const bonus = m.type === "ufo" ? 200 : m.type === "bat" ? 150 : 100;
+              gs.score += bonus;
+              addFloat(gs, m.x + m.w / 2, m.y, "+" + bonus, "#ff4020");
             }
+          }
+        });
+
+        // Monster kills player (touch from side/top)
+        if (!m.alive) return;
+        const mRight = m.x + m.w;
+        const mBottom = m.y + m.h;
+        const pRight = gs.px + PLAYER_W;
+        const pBottom = gs.py + PLAYER_H;
+        const overlap =
+          gs.px + 10 < mRight - 10 &&
+          pRight - 10 > m.x + 10 &&
+          gs.py + 8 < mBottom - 8 &&
+          pBottom - 8 > m.y + 8;
+
+        if (overlap) {
+          // Stomp from above
+          if (gs.pvy > 0 && gs.py + PLAYER_H < m.y + m.h * 0.5) {
+            m.hp--;
+            if (m.hp <= 0) {
+              m.alive = false;
+              addParticles(gs, m.x + m.w / 2, m.y + m.h / 2, "#ff6030", 16);
+              const bonus = m.type === "ufo" ? 200 : 100;
+              gs.score += bonus;
+              addFloat(gs, m.x + m.w / 2, m.y, "+" + bonus, "#ff4020");
+            }
+            gs.pvy = BASE_JUMP;
+          } else {
+            // Hurt player
+            die(gs);
           }
         }
       });
-      state.enemies = state.enemies.filter((e) => e.alive);
+      gs.monsters = gs.monsters.filter(
+        (m) => m.alive || true // keep for death anim
+      ).filter((m) => m.alive && toScreen(m.y) < H + 80);
 
-      state.particles.forEach((p) => {
+      // Aim angle
+      const cx = gs.px + PLAYER_W / 2;
+      const cy = toScreen(gs.py + PLAYER_H / 2);
+      gs.aimAngle = Math.atan2(gs.mouse.y - cy, gs.mouse.x - cx);
+
+      // Particles & floats
+      gs.particles.forEach((p) => {
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += 0.1;
-        p.life -= 0.02;
+        p.vy += 0.12;
+        p.life -= 0.025;
       });
-      state.particles = state.particles.filter((p) => p.life > 0);
+      gs.particles = gs.particles.filter((p) => p.life > 0);
 
-      const screenPY = state.playerY - state.cameraY;
-      if (screenPY > CANVAS_HEIGHT + 80) {
-        state.phase = "dead";
-        if (state.score > savedHighScore.current) {
-          savedHighScore.current = state.score;
-          localStorage.setItem("doodle_highscore", String(state.score));
-          state.highScore = state.score;
-        }
+      gs.floats.forEach((f) => {
+        f.y += f.vy;
+        f.life -= 0.018;
+      });
+      gs.floats = gs.floats.filter((f) => f.life > 0);
+
+      // Fall off screen
+      if (toScreen(gs.py) > H + 60) {
+        die(gs);
       }
     }
 
-    function render(state: GameState) {
-      ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-      drawBackground(state);
-
-      state.platforms.forEach((p) => drawPlatform(p, state.cameraY));
-
-      drawParticles(state);
-
-      state.enemies.forEach((e) => drawEnemy(e, state.cameraY));
-
-      if (state.phase === "playing" || state.phase === "dead") {
-        drawPlayer(state);
-        drawHUD(state);
-      }
-
-      if (state.phase === "menu") {
-        drawPlayer(state);
-        drawMenu(state);
-      }
-
-      if (state.phase === "dead") {
-        drawGameOver(state);
+    function die(gs: GS) {
+      if (gs.phase !== "playing") return;
+      gs.phase = "dead";
+      if (gs.score > hiRef.current) {
+        hiRef.current = gs.score;
+        gs.hi = gs.score;
+        localStorage.setItem("djhi", String(gs.score));
       }
     }
 
     function loop() {
-      const state = stateRef.current;
-      update(state);
-      render(state);
-
-      if (state.phase === "playing") {
-        setDisplayScore(state.score);
-      }
-      if (state.phase === "dead") {
-        setDisplayPhase("dead");
-        setDisplayScore(state.score);
-        setDisplayHighScore(state.highScore);
-      }
-
-      animRef.current = requestAnimationFrame(loop);
+      update();
+      render();
+      rafRef.current = requestAnimationFrame(loop);
     }
 
-    animRef.current = requestAnimationFrame(loop);
-
-    return () => {
-      cancelAnimationFrame(animRef.current);
-    };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  const handleClick = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const state = stateRef.current;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = CANVAS_WIDTH / rect.width;
-      const mx = (e.clientX - rect.left) * scaleX;
-      const my = (e.clientY - rect.top) * (CANVAS_HEIGHT / rect.height);
+  const shoot = useCallback(() => {
+    const gs = gsRef.current;
+    if (gs.phase !== "playing" || gs.shootCooldown > 0) return;
+    const angle = gs.pface === 1 ? gs.aimAngle : Math.PI - gs.aimAngle;
+    const speed = 14;
+    gs.bullets.push({
+      id: gs.bid++,
+      x: gs.px + PLAYER_W / 2 + Math.cos(angle) * 20,
+      y: gs.py + PLAYER_H / 2 + Math.sin(angle) * 20,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+    });
+    gs.shootCooldown = 12;
+    addParticles(gs, gs.px + PLAYER_W / 2, gs.py + PLAYER_H / 2, "#ffcc20", 3);
+  }, []);
 
-      if (state.phase === "menu") {
-        if (mx > CANVAS_WIDTH / 2 - 90 && mx < CANVAS_WIDTH / 2 + 90 && my > 285 && my < 333) {
-          startGame();
-        }
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    gsRef.current.mouse.x = (e.clientX - rect.left) * (W / rect.width);
+    gsRef.current.mouse.y = (e.clientY - rect.top) * (H / rect.height);
+  }, []);
+
+  const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const gs = gsRef.current;
+    if (gs.phase === "menu") {
+      const canvas = canvasRef.current!;
+      const rect = canvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (W / rect.width);
+      const my = (e.clientY - rect.top) * (H / rect.height);
+      if (mx > W / 2 - 85 && mx < W / 2 + 85 && my > 286 && my < 334) {
+        startGame();
       }
-      if (state.phase === "dead") {
-        if (mx > CANVAS_WIDTH / 2 - 80 && mx < CANVAS_WIDTH / 2 + 80 && my > 305 && my < 353) {
-          startGame();
-        }
+      return;
+    }
+    if (gs.phase === "dead") {
+      const canvas = canvasRef.current!;
+      const rect = canvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (W / rect.width);
+      const my = (e.clientY - rect.top) * (H / rect.height);
+      if (mx > W / 2 - 80 && mx < W / 2 + 80 && my > 370 && my < 418) {
+        startGame();
       }
-    },
-    [startGame]
-  );
+      return;
+    }
+    shoot();
+  }, [startGame, shoot]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    stateRef.current.touchStartX = e.touches[0].clientX;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    e.preventDefault();
+    const gs = gsRef.current;
+    const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    const mx = (e.touches[0].clientX - rect.left) * (CANVAS_WIDTH / rect.width);
-    const my = (e.touches[0].clientY - rect.top) * (CANVAS_HEIGHT / rect.height);
-    const state = stateRef.current;
-    if (state.phase === "menu") {
-      if (mx > CANVAS_WIDTH / 2 - 90 && mx < CANVAS_WIDTH / 2 + 90 && my > 285 && my < 333) {
-        startGame();
-      }
+    const t = e.touches[0];
+    const mx = (t.clientX - rect.left) * (W / rect.width);
+    const my = (t.clientY - rect.top) * (H / rect.height);
+
+    gs.mouse.x = mx;
+    gs.mouse.y = my;
+
+    if (gs.phase === "menu") {
+      if (mx > W / 2 - 85 && mx < W / 2 + 85 && my > 286 && my < 334) startGame();
+      return;
     }
-    if (state.phase === "dead") {
-      if (mx > CANVAS_WIDTH / 2 - 80 && mx < CANVAS_WIDTH / 2 + 80 && my > 305 && my < 353) {
-        startGame();
-      }
+    if (gs.phase === "dead") {
+      if (mx > W / 2 - 80 && mx < W / 2 + 80 && my > 370 && my < 418) startGame();
+      return;
     }
-  }, [startGame]);
+
+    // Touch left/right side moves, tap middle area shoots
+    if (mx < W * 0.3) {
+      gs.keys["ArrowLeft"] = true;
+      gs.keys["ArrowRight"] = false;
+    } else if (mx > W * 0.7) {
+      gs.keys["ArrowRight"] = true;
+      gs.keys["ArrowLeft"] = false;
+    } else {
+      shoot();
+    }
+  }, [startGame, shoot]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
-    const state = stateRef.current;
-    if (state.phase !== "playing") return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const gs = gsRef.current;
+    if (gs.phase !== "playing") return;
+    const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    const touchX = e.touches[0].clientX;
-    const canvasX = (touchX - rect.left) * (CANVAS_WIDTH / rect.width);
-
-    if (canvasX < CANVAS_WIDTH / 2) {
-      state.keys["ArrowLeft"] = true;
-      state.keys["ArrowRight"] = false;
-      state.playerFacing = -1;
+    const t = e.touches[0];
+    const mx = (t.clientX - rect.left) * (W / rect.width);
+    const my = (t.clientY - rect.top) * (H / rect.height);
+    gs.mouse.x = mx;
+    gs.mouse.y = my;
+    if (mx < W * 0.3) {
+      gs.keys["ArrowLeft"] = true;
+      gs.keys["ArrowRight"] = false;
+    } else if (mx > W * 0.7) {
+      gs.keys["ArrowRight"] = true;
+      gs.keys["ArrowLeft"] = false;
     } else {
-      state.keys["ArrowRight"] = true;
-      state.keys["ArrowLeft"] = false;
-      state.playerFacing = 1;
+      gs.keys["ArrowLeft"] = false;
+      gs.keys["ArrowRight"] = false;
     }
   }, []);
 
-  const handleTouchEnd = useCallback(() => {
-    const state = stateRef.current;
-    state.keys["ArrowLeft"] = false;
-    state.keys["ArrowRight"] = false;
-    state.touchStartX = null;
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    const gs = gsRef.current;
+    gs.keys["ArrowLeft"] = false;
+    gs.keys["ArrowRight"] = false;
   }, []);
 
   return (
     <div
-      className="flex flex-col items-center justify-center min-h-screen"
       style={{
-        background: "linear-gradient(135deg, #0a0a1a 0%, #0d1a2e 50%, #050d1a 100%)",
+        width: "100vw",
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#1a1a2e",
       }}
     >
       <div
         style={{
           position: "relative",
-          boxShadow: "0 0 60px rgba(0,255,180,0.18), 0 0 120px rgba(0,100,255,0.10)",
-          borderRadius: "18px",
+          borderRadius: "12px",
           overflow: "hidden",
-          border: "2px solid rgba(0,255,180,0.15)",
+          boxShadow: "0 8px 40px rgba(0,0,0,0.7), 0 0 0 3px #2a9010",
         }}
       >
         <canvas
           ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
+          width={W}
+          height={H}
           style={{
             display: "block",
-            maxHeight: "90vh",
+            maxHeight: "92vh",
             width: "auto",
-            cursor: "pointer",
-            userSelect: "none",
+            cursor: "crosshair",
             touchAction: "none",
+            userSelect: "none",
           }}
+          onMouseMove={handleMouseMove}
           onClick={handleClick}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         />
-      </div>
-
-      <div
-        style={{
-          marginTop: "18px",
-          display: "flex",
-          gap: "24px",
-          alignItems: "center",
-        }}
-      >
-        <div style={{ textAlign: "center" }}>
-          <div
-            style={{
-              color: "rgba(160,220,255,0.7)",
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "2px",
-              fontFamily: "sans-serif",
-            }}
-          >
-            Score
-          </div>
-          <div
-            style={{
-              color: "#fff",
-              fontSize: "22px",
-              fontWeight: "bold",
-              fontFamily: "sans-serif",
-            }}
-          >
-            {displayScore.toLocaleString()}
-          </div>
-        </div>
-        <div
-          style={{
-            width: "1px",
-            height: "40px",
-            background: "rgba(255,255,255,0.15)",
-          }}
-        />
-        <div style={{ textAlign: "center" }}>
-          <div
-            style={{
-              color: "#ffd700",
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "2px",
-              fontFamily: "sans-serif",
-            }}
-          >
-            Best
-          </div>
-          <div
-            style={{
-              color: "#ffd700",
-              fontSize: "22px",
-              fontWeight: "bold",
-              fontFamily: "sans-serif",
-            }}
-          >
-            {displayHighScore.toLocaleString()}
-          </div>
-        </div>
-      </div>
-
-      <div
-        style={{
-          marginTop: "14px",
-          color: "rgba(180,200,255,0.4)",
-          fontSize: "12px",
-          fontFamily: "sans-serif",
-          textAlign: "center",
-          letterSpacing: "1px",
-        }}
-      >
-        ← → arrow keys or A/D · Touch left/right half to move
       </div>
     </div>
   );
