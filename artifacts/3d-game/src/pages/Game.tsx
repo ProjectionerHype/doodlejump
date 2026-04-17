@@ -586,10 +586,10 @@ export default function Game() {
       ctx.translate(sx + PLAYER_W / 2, sy + PLAYER_H / 2);
       ctx.scale(f, 1);
 
-      // Squish/stretch on jump
+      // Squish/stretch on jump + smaller overall size
       const sqX = rising ? 0.82 : falling ? 1.15 : 1;
       const sqY = rising ? 1.18 : falling ? 0.86 : 1;
-      ctx.scale(sqX, sqY);
+      ctx.scale(sqX * 0.72, sqY * 0.72);
 
       // ── Jetpack ──
       if (gs.jetpack > 0) {
@@ -653,21 +653,8 @@ export default function Game() {
       ctx.fillStyle = bellyG;
       ctx.beginPath(); ctx.ellipse(2, 9, 13, 11, 0, 0, Math.PI * 2); ctx.fill();
 
-      // ── Gun arm (before eyes so it goes behind) ──
+      // Aim angle (used for pupils only)
       const aimAngleAdj = gs.pface === 1 ? gs.aimAngle : Math.PI - gs.aimAngle;
-      ctx.save();
-      ctx.translate(16, 2);
-      ctx.rotate(aimAngleAdj);
-      // Little frog arm
-      ctx.fillStyle = "#3aaa18"; ctx.strokeStyle = "#186004"; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.roundRect(0, -4, 16, 8, 5); ctx.fill(); ctx.stroke();
-      // Gun
-      const gG = ctx.createLinearGradient(14, -3, 30, 3);
-      gG.addColorStop(0, "#777"); gG.addColorStop(0.5, "#bbb"); gG.addColorStop(1, "#555");
-      ctx.fillStyle = gG; ctx.strokeStyle = "#333"; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.roundRect(14, -3.5, 18, 7, 3); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#333"; ctx.fillRect(30, -2, 5, 4);
-      ctx.restore();
 
       // ── BIG googly eye sockets (protruding bumps) ──
       // Left eye socket
