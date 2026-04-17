@@ -573,122 +573,217 @@ export default function Game() {
       ctx.restore();
     }
 
-    // ─── DRAW DOODLER ────────────────────────────────────────────
+    // ─── DRAW DERPY FROG ─────────────────────────────────────────
     function drawDoodler(gs: GS) {
       const sx = gs.px;
       const sy = toScreen(gs.py);
       const f = gs.pface;
       const t = gs.animT;
+      const falling = gs.pvy > 2;
+      const rising = gs.pvy < -3;
 
       ctx.save();
       ctx.translate(sx + PLAYER_W / 2, sy + PLAYER_H / 2);
       ctx.scale(f, 1);
 
-      // Jetpack
+      // Squish/stretch on jump
+      const sqX = rising ? 0.82 : falling ? 1.15 : 1;
+      const sqY = rising ? 1.18 : falling ? 0.86 : 1;
+      ctx.scale(sqX, sqY);
+
+      // ── Jetpack ──
       if (gs.jetpack > 0) {
-        ctx.fillStyle = "#e04020";
-        ctx.fillRect(-26, -10, 10, 22);
-        ctx.fillStyle = "#ff8040";
-        const flameH = 8 + Math.sin(t * 0.5) * 5;
+        ctx.fillStyle = "#cc3010";
+        ctx.strokeStyle = "#881000"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.roundRect(-30, -8, 12, 24, 4); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#ff6030";
+        const flameH = 10 + Math.sin(t * 0.5) * 6;
         ctx.beginPath();
-        ctx.moveTo(-26, 12);
-        ctx.lineTo(-20, 12 + flameH);
-        ctx.lineTo(-16, 12);
-        ctx.fill();
+        ctx.moveTo(-30, 16); ctx.lineTo(-24, 16 + flameH); ctx.lineTo(-18, 16); ctx.fill();
+        ctx.fillStyle = "#ffcc40"; ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(-29, 16); ctx.lineTo(-24, 16 + flameH * 0.5); ctx.lineTo(-19, 16); ctx.fill();
+        ctx.globalAlpha = 1;
       }
 
-      // Body - the iconic Doodler shape
-      const bodyGrad = ctx.createRadialGradient(-4, -5, 3, 0, 0, 22);
-      bodyGrad.addColorStop(0, "#d4e870");
-      bodyGrad.addColorStop(0.5, "#a8c030");
-      bodyGrad.addColorStop(1, "#708010");
-      ctx.fillStyle = bodyGrad;
-      ctx.strokeStyle = "#506010";
-      ctx.lineWidth = 2;
+      // ── Hind legs (behind body) ──
+      const legBob = rising ? -8 : falling ? 6 : Math.sin(t * 0.18) * 5;
+      ctx.fillStyle = "#3aaa18";
+      ctx.strokeStyle = "#1d6a0a"; ctx.lineWidth = 2;
+      // Left hind leg
       ctx.beginPath();
-      ctx.ellipse(0, 0, 20, 22, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-
-      // Eyes - large white with pupils
-      ctx.fillStyle = "#fff";
-      ctx.strokeStyle = "#333";
-      ctx.lineWidth = 1.5;
+      ctx.ellipse(-18, 14 + legBob, 9, 6, -0.5, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // Left foot
+      ctx.fillStyle = "#50cc20";
       ctx.beginPath();
-      ctx.ellipse(8, -7, 8, 8, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+      ctx.ellipse(-22, 20 + legBob, 11, 5, -0.3, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // Right hind leg
+      ctx.fillStyle = "#3aaa18";
+      ctx.beginPath();
+      ctx.ellipse(14, 14 + legBob, 9, 6, 0.5, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#50cc20";
+      ctx.beginPath();
+      ctx.ellipse(18, 20 + legBob, 11, 5, 0.3, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
 
-      // Pupil
+      // ── Main body — round, fat frog ──
+      const bodyG = ctx.createRadialGradient(-5, -8, 4, 0, 0, 24);
+      bodyG.addColorStop(0, "#7eee40");
+      bodyG.addColorStop(0.45, "#4acc18");
+      bodyG.addColorStop(0.8, "#2e9a08");
+      bodyG.addColorStop(1, "#1a6204");
+      ctx.fillStyle = bodyG;
+      ctx.strokeStyle = "#186004"; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(0, 2, 22, 21, 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+
+      // Body highlight
+      ctx.fillStyle = "rgba(180,255,120,0.25)";
+      ctx.beginPath(); ctx.ellipse(-6, -8, 10, 7, -0.4, 0, Math.PI * 2); ctx.fill();
+
+      // Belly — lighter patch
+      const bellyG = ctx.createRadialGradient(2, 8, 2, 2, 8, 14);
+      bellyG.addColorStop(0, "#d8f8a8");
+      bellyG.addColorStop(0.6, "#a8e870");
+      bellyG.addColorStop(1, "rgba(168,232,112,0)");
+      ctx.fillStyle = bellyG;
+      ctx.beginPath(); ctx.ellipse(2, 9, 13, 11, 0, 0, Math.PI * 2); ctx.fill();
+
+      // ── Gun arm (before eyes so it goes behind) ──
       const aimAngleAdj = gs.pface === 1 ? gs.aimAngle : Math.PI - gs.aimAngle;
-      const pDx = Math.cos(aimAngleAdj) * 3.5;
-      const pDy = Math.sin(aimAngleAdj) * 3.5;
-      ctx.fillStyle = "#1a1a2e";
-      ctx.beginPath();
-      ctx.ellipse(8 + pDx, -7 + pDy, 4, 4, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Shine
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.ellipse(10 + pDx, -9 + pDy, 1.5, 1.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Nose
-      ctx.fillStyle = "#b8a060";
-      ctx.beginPath();
-      ctx.ellipse(14, -2, 4, 3, 0.3, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Nostrils
-      ctx.fillStyle = "#806020";
-      ctx.beginPath();
-      ctx.ellipse(13, -2, 1.2, 1, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(16, -1.5, 1.2, 1, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Gun / shooter arm
-      const armAngle = aimAngleAdj;
       ctx.save();
-      ctx.translate(12, 2);
-      ctx.rotate(armAngle);
-      ctx.fillStyle = "#607030";
-      ctx.strokeStyle = "#304010";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.roundRect(0, -4, 26, 8, 4);
-      ctx.fill();
-      ctx.stroke();
-      // Gun barrel
-      ctx.fillStyle = "#404020";
-      ctx.fillRect(20, -2.5, 8, 5);
+      ctx.translate(16, 2);
+      ctx.rotate(aimAngleAdj);
+      // Little frog arm
+      ctx.fillStyle = "#3aaa18"; ctx.strokeStyle = "#186004"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.roundRect(0, -4, 16, 8, 5); ctx.fill(); ctx.stroke();
+      // Gun
+      const gG = ctx.createLinearGradient(14, -3, 30, 3);
+      gG.addColorStop(0, "#777"); gG.addColorStop(0.5, "#bbb"); gG.addColorStop(1, "#555");
+      ctx.fillStyle = gG; ctx.strokeStyle = "#333"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.roundRect(14, -3.5, 18, 7, 3); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#333"; ctx.fillRect(30, -2, 5, 4);
       ctx.restore();
 
-      // Feet
-      const legSwing = Math.sin(t * 0.2) * 8;
-      ctx.fillStyle = "#a0b828";
-      ctx.strokeStyle = "#506010";
-      ctx.lineWidth = 1.5;
+      // ── BIG googly eye sockets (protruding bumps) ──
+      // Left eye socket
+      const eyeSocketG = ctx.createRadialGradient(-8, -20, 1, -8, -20, 12);
+      eyeSocketG.addColorStop(0, "#7eee40");
+      eyeSocketG.addColorStop(0.6, "#4acc18");
+      eyeSocketG.addColorStop(1, "#2a8808");
+      ctx.fillStyle = eyeSocketG;
+      ctx.strokeStyle = "#186004"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(-8, -20, 11, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+      // Right eye socket
+      const eyeSocketG2 = ctx.createRadialGradient(8, -20, 1, 8, -20, 12);
+      eyeSocketG2.addColorStop(0, "#7eee40");
+      eyeSocketG2.addColorStop(0.6, "#4acc18");
+      eyeSocketG2.addColorStop(1, "#2a8808");
+      ctx.fillStyle = eyeSocketG2;
+      ctx.strokeStyle = "#186004"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(8, -20, 11, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+      // ── Eye whites ──
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#ddd"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(-8, -20, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(8, -20, 9, 0, Math.PI * 2); ctx.fill();
+
+      // ── Pupils — one aims at cursor (derpy!), other looks opposite ──
+      const pDx = Math.cos(aimAngleAdj) * 4;
+      const pDy = Math.sin(aimAngleAdj) * 4;
+      // Left pupil (looks at aim target)
+      ctx.fillStyle = "#1a2a00";
+      ctx.beginPath(); ctx.arc(-8 + pDx, -20 + pDy, 4.5, 0, Math.PI * 2); ctx.fill();
+      // Right pupil (derpy — looks slightly different direction)
+      ctx.beginPath(); ctx.arc(8 - pDx * 0.3 + 1, -20 + pDy * 0.7 + 1, 4.5, 0, Math.PI * 2); ctx.fill();
+
+      // Iris
+      ctx.fillStyle = "#3aaa00";
+      ctx.beginPath(); ctx.arc(-8 + pDx * 0.6, -20 + pDy * 0.6, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(8 - pDx * 0.2 + 0.5, -20 + pDy * 0.4 + 0.5, 2.5, 0, Math.PI * 2); ctx.fill();
+
+      // Eye shines
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(-8 + pDx * 0.4 + 2, -20 + pDy * 0.4 - 2, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(8 - pDx * 0.1 + 2.5, -20 + pDy * 0.2 - 2, 2, 0, Math.PI * 2); ctx.fill();
+
+      // Extra googly shine (small)
+      ctx.beginPath(); ctx.arc(-8 + pDx * 0.4 - 2, -20 + pDy * 0.4 + 1, 0.9, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(8 - pDx * 0.1 - 1, -20 + pDy * 0.2 + 1, 0.9, 0, Math.PI * 2); ctx.fill();
+
+      // ── Wide goofy mouth ──
+      ctx.strokeStyle = "#0a4000"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.ellipse(-6 + legSwing * 0.3, 20, 7, 5, -0.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.ellipse(8 - legSwing * 0.3, 20, 7, 5, 0.2, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.moveTo(-13, 6);
+      ctx.quadraticCurveTo(-6, 14, 0, 14);
+      ctx.quadraticCurveTo(6, 14, 13, 6);
       ctx.stroke();
 
-      // Hat if active
+      // Mouth opening
+      ctx.fillStyle = "#cc2244";
+      ctx.beginPath();
+      ctx.moveTo(-10, 8);
+      ctx.quadraticCurveTo(0, 16, 10, 8);
+      ctx.quadraticCurveTo(0, 12, -10, 8);
+      ctx.fill();
+
+      // ── Tongue sticking out (wiggles!) ──
+      const tongueWag = Math.sin(t * 0.25) * 3;
+      ctx.fillStyle = "#ff4488";
+      ctx.strokeStyle = "#cc2060"; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-4, 12);
+      ctx.quadraticCurveTo(0 + tongueWag * 0.5, 16, 2, 22 + tongueWag);
+      ctx.quadraticCurveTo(4 + tongueWag, 26 + tongueWag, 0, 26 + tongueWag);
+      ctx.quadraticCurveTo(-4 + tongueWag, 26 + tongueWag, -2, 22 + tongueWag);
+      ctx.quadraticCurveTo(-1 + tongueWag * 0.5, 16, 4, 12);
+      ctx.fill(); ctx.stroke();
+      // Tongue tip crease
+      ctx.strokeStyle = "#ff70aa"; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, 24 + tongueWag);
+      ctx.lineTo(0, 26 + tongueWag);
+      ctx.stroke();
+
+      // ── Nostrils ──
+      ctx.fillStyle = "#1a6000";
+      ctx.beginPath(); ctx.ellipse(-4, -3, 2, 1.5, -0.2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(4, -3, 2, 1.5, 0.2, 0, Math.PI * 2); ctx.fill();
+
+      // ── Cheek blush dots ──
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = "#ff8888";
+      ctx.beginPath(); ctx.ellipse(-17, 2, 5, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(17, 2, 5, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // ── Propeller hat ──
       if (gs.hat > 0) {
-        ctx.fillStyle = "#4040dd";
-        ctx.beginPath();
-        ctx.ellipse(0, -22, 14, 5, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillRect(-10, -38, 20, 16);
-        ctx.fillStyle = "#8080ff";
-        ctx.fillRect(-10, -36, 20, 4);
+        const hatSpin = t * 0.2;
+        ctx.fillStyle = "#2222cc";
+        ctx.strokeStyle = "#111188"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(0, -33, 13, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#3333ee";
+        ctx.beginPath(); ctx.roundRect(-9, -48, 18, 15, 4); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#6666ff";
+        ctx.fillRect(-9, -46, 18, 4);
+        // Spinning prop
+        ctx.save(); ctx.translate(0, -50); ctx.rotate(hatSpin);
+        ["#ff4040", "#40cc40", "#4040ff", "#ffcc00"].forEach((c, i) => {
+          ctx.fillStyle = c;
+          ctx.save(); ctx.rotate((i * Math.PI) / 2);
+          ctx.beginPath(); ctx.ellipse(10, 0, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        });
+        ctx.fillStyle = "#aaa"; ctx.strokeStyle = "#666"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.restore();
       }
 
       ctx.restore();
