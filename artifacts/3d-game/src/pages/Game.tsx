@@ -325,15 +325,6 @@ export default function Game() {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
       }
 
-      // Red margin line — vivid with slight inner shadow
-      const marginX = 52;
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "rgba(220,60,60,0.55)";
-      ctx.beginPath(); ctx.moveTo(marginX, 0); ctx.lineTo(marginX, H); ctx.stroke();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = "rgba(220,60,60,0.18)";
-      ctx.beginPath(); ctx.moveTo(marginX - 4, 0); ctx.lineTo(marginX - 4, H); ctx.stroke();
-
     }
 
     // ─── DRAW PLATFORM ───────────────────────────────────────────
