@@ -1,0 +1,5 @@
+name = "doodlejump"
+pages_build_output_dir = "artifacts/3d-game/dist"
+
+[build]
+command = "pnpm run build:cf"
