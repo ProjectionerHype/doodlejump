@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Doodle Jump"
+version = "1.0.0"
+id = "artifacts/doodle-jump-game"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22529
+
+[services.development]
+run = "pnpm --filter @workspace/doodle-jump-game run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/doodle-jump-game", "run", "build" ]
+publicDir = "artifacts/doodle-jump-game/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22529"
+BASE_PATH = "/"
