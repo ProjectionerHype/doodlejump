@@ -444,12 +444,6 @@ export default function Game() {
       ctx.fillText(`Score: ${gs.score}`, 16, 24);
       ctx.fillStyle = "#a05010"; ctx.fillText(`Best: ${gs.hi}`, 16, 40);
 
-      // Zone badge (top center)
-      const z = ZONES[gs.zone];
-      ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.beginPath(); ctx.roundRect(W / 2 - 60, 8, 120, 22, 10); ctx.fill();
-      ctx.fillStyle = "#fff"; ctx.font = "bold 11px 'Comic Sans MS', cursive"; ctx.textAlign = "center";
-      ctx.fillText(`${z.emoji} ${z.name}`, W / 2, 23);
-
       // Combo indicator
       if (gs.combo >= 2) {
         const pulse = 1 + Math.sin(gs.frameN * 0.25) * 0.08;
