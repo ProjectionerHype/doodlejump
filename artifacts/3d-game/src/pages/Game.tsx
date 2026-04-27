@@ -23,7 +23,7 @@ interface Monster {
 
 interface Particle {
   id: number; x: number; y: number; vx: number; vy: number;
-  life: number; color: string; r: number;
+  life: number; color: string; r: number; trail?: boolean;
 }
 
 interface FloatingText {
@@ -115,6 +115,25 @@ function addParticles(gs: GS, x: number, y: number, color: string, n = 8) {
 
 function addFloat(gs: GS, x: number, y: number, text: string, color: string) {
   gs.floats.push({ id: gs.fid++, x, y, vy: -1.5, text, life: 1, color });
+}
+
+function addTrail(gs: GS, x: number, y: number, color: string, speed: number) {
+  const n = Math.random() < 0.6 ? 1 : 2;
+  for (let i = 0; i < n; i++) {
+    const spreadX = (Math.random() - 0.5) * 2.5;
+    const spreadY = (Math.random() - 0.5) * 2.5;
+    gs.particles.push({
+      id: gs.pcid++,
+      x: x + spreadX,
+      y: y + spreadY,
+      vx: -speed * 0.18 + (Math.random() - 0.5) * 1.2,
+      vy: -0.4 + (Math.random() - 0.5) * 0.8,
+      life: 0.55 + Math.random() * 0.35,
+      color,
+      r: 2.5 + Math.random() * 2.5,
+      trail: true,
+    });
+  }
 }
 
 export default function Game() {
@@ -448,7 +467,26 @@ export default function Game() {
         }
         ctx.restore();
       });
+      // Draw trail particles first (below frog) with additive glow
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
       gs.particles.forEach((p) => {
+        if (!p.trail) return;
+        const sy = toScreen(p.y);
+        const radius = p.r * p.life;
+        if (radius < 0.3) return;
+        const grd = ctx.createRadialGradient(p.x, sy, 0, p.x, sy, radius * 2.2);
+        grd.addColorStop(0, p.color);
+        grd.addColorStop(0.55, p.color);
+        grd.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.globalAlpha = p.life * 0.85;
+        ctx.fillStyle = grd;
+        ctx.beginPath(); ctx.arc(p.x, sy, radius * 2.2, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.restore();
+      // Draw regular explosion particles normally
+      gs.particles.forEach((p) => {
+        if (p.trail) return;
         const sy = toScreen(p.y);
         ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
         ctx.beginPath(); ctx.arc(p.x, sy, p.r * p.life, 0, Math.PI * 2); ctx.fill();
@@ -526,6 +564,27 @@ export default function Game() {
         const d = H / 2.5 - screenPY;
         gs.camY -= d; gs.scrolled += d;
         gs.score = Math.max(gs.score, Math.floor(gs.scrolled / 4));
+      }
+
+      // Speed trail emission
+      const absVx = Math.abs(gs.pvx);
+      const absVy = Math.abs(gs.pvy);
+      const fastEnough = absVx > 2.8 || (gs.jetpack > 0 && absVy > 3) || (gs.hat > 0 && gs.pvy < -2);
+      if (fastEnough) {
+        // Emit from the back-center of the frog body
+        const trailX = gs.px + PLAYER_W / 2 + (gs.pvx > 0 ? -10 : 10);
+        const trailY = gs.py + PLAYER_H * 0.55;
+        let color: string;
+        if (gs.jetpack > 0) {
+          color = Math.random() < 0.5 ? "#ff9030" : "#ffee60";
+        } else if (gs.hat > 0) {
+          color = Math.random() < 0.5 ? "#60ccff" : "#ffffff";
+        } else if (absVx > 5.5) {
+          color = Math.random() < 0.5 ? "#c0ff40" : "#ffffff";
+        } else {
+          color = Math.random() < 0.5 ? "#80ee20" : "#ccff88";
+        }
+        addTrail(gs, trailX, trailY, color, gs.pvx);
       }
 
       // Platform collisions
@@ -620,7 +679,11 @@ export default function Game() {
       gs.monsters = gs.monsters.filter((m) => m.alive && toScreen(m.y) < H + 80);
 
       // Particles & floats
-      gs.particles.forEach((p) => { p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life -= 0.025; });
+      gs.particles.forEach((p) => {
+        p.x += p.vx; p.y += p.vy;
+        p.vy += p.trail ? 0.04 : 0.12;
+        p.life -= p.trail ? 0.07 : 0.025;
+      });
       gs.particles = gs.particles.filter((p) => p.life > 0);
       gs.floats.forEach((f) => { f.y += f.vy; f.life -= 0.018; });
       gs.floats = gs.floats.filter((f) => f.life > 0);
