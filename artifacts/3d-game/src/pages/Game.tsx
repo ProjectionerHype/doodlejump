@@ -7,6 +7,28 @@ const BASE_JUMP = -14;
 const SPRING_JUMP = -20;
 const MOVE_SPEED = 7;
 
+// ── ZONES ────────────────────────────────────────────────────────
+const ZONES = [
+  { name: "Notebook",     emoji: "📓", threshold: 0,    bgA: "#fefaf2", bgB: "#f0e8d8" },
+  { name: "Cloud Kingdom",emoji: "☁️",  threshold: 1000, bgA: "#d0eeff", bgB: "#a8d8ff" },
+  { name: "Outer Space",  emoji: "🚀", threshold: 2000, bgA: "#0a0820", bgB: "#1a0838" },
+  { name: "Deep Ocean",   emoji: "🌊", threshold: 3000, bgA: "#003860", bgB: "#001830" },
+];
+
+function getZone(score: number) {
+  let z = 0;
+  for (let i = ZONES.length - 1; i >= 0; i--) if (score >= ZONES[i].threshold) { z = i; break; }
+  return z;
+}
+
+// Per-zone platform normal colors [top, mid, bot, stroke, shine]
+const ZONE_PLAT_COLORS = [
+  ["#90e870", "#38c020", "#208010", "#186010", "rgba(255,255,255,0.4)"],  // notebook
+  ["#fff8f0", "#f0d890", "#c8a840", "#8a6010", "rgba(255,255,255,0.6)"],  // clouds – golden
+  ["#c060ff", "#8020e0", "#5000b0", "#3000a0", "rgba(200,140,255,0.5)"],  // space – purple
+  ["#50e8d0", "#10b8a0", "#008870", "#005850", "rgba(180,255,240,0.45)"], // ocean – teal
+];
+
 type PType = "normal" | "moving" | "broken" | "spring" | "disappear";
 
 interface Platform {
@@ -14,28 +36,23 @@ interface Platform {
   type: PType; vx: number; cracked: boolean; crackedTimer: number;
   bounceTimer: number; used: boolean;
 }
-
 interface Monster {
   id: number; x: number; y: number; w: number; h: number;
   vx: number; type: "worm" | "ufo" | "bat"; alive: boolean;
   frame: number; hp: number;
 }
-
 interface Particle {
   id: number; x: number; y: number; vx: number; vy: number;
   life: number; color: string; r: number; trail?: boolean;
 }
-
 interface FloatingText {
   id: number; x: number; y: number; vy: number;
-  text: string; life: number; color: string;
+  text: string; life: number; color: string; big?: boolean;
 }
-
 interface PowerUp {
   id: number; x: number; y: number;
   type: "spring" | "jetpack" | "hat"; collected: boolean;
 }
-
 interface GS {
   phase: "menu" | "playing" | "dead";
   px: number; py: number; pvx: number; pvy: number;
@@ -44,10 +61,12 @@ interface GS {
   particles: Particle[]; floats: FloatingText[]; powerups: PowerUp[];
   score: number; hi: number; camY: number; scrolled: number;
   keys: Record<string, boolean>;
-  // smooth touch: world-space target X for frog center, null = no touch
-  touchTargetX: number | null;
-  tiltX: number;
+  touchTargetX: number | null; tiltX: number;
   jetpack: number; hat: number;
+  // combo system
+  combo: number; comboTimer: number;
+  // world zone
+  zone: number; zoneTimer: number;
   pid: number; mid: number; fid: number; puid: number; pcid: number;
   frameN: number;
 }
@@ -55,38 +74,25 @@ interface GS {
 const PW = 66; const PH = 14;
 const PLAYER_W = 46; const PLAYER_H = 50;
 
-function platGap(score: number): number {
-  return 55 + Math.min(score / 100, 70) + Math.random() * 20;
-}
+function platGap(score: number) { return 55 + Math.min(score / 100, 70) + Math.random() * 20; }
 
-function makePlat(id: number, x: number, y: number, score: number): Platform {
-  const r = Math.random();
-  const d = Math.min(score / 2000, 1);
+function makePlat(id: number, _x: number, y: number, score: number): Platform {
+  const r = Math.random(); const d = Math.min(score / 2000, 1);
   let type: PType = "normal";
   if (r < 0.06 * d) type = "spring";
   else if (r < 0.2 * d) type = "broken";
   else if (r < 0.38 * d) type = "moving";
   else if (r < 0.45 * d) type = "disappear";
   const w = type === "spring" ? 60 : PW;
-  return {
-    id, x: Math.max(0, Math.min(W - w, Math.random() * (W - w))),
-    y, w, h: PH, type,
-    vx: type === "moving" ? (Math.random() > 0.5 ? 1.8 : -1.8) : 0,
-    cracked: false, crackedTimer: 0, bounceTimer: 0, used: false,
-  };
+  return { id, x: Math.max(0, Math.min(W - w, Math.random() * (W - w))), y, w, h: PH, type, vx: type === "moving" ? (Math.random() > 0.5 ? 1.8 : -1.8) : 0, cracked: false, crackedTimer: 0, bounceTimer: 0, used: false };
 }
 
 function makeMonster(id: number, camY: number, score: number): Monster {
-  const types: Array<"worm" | "ufo" | "bat"> = ["worm", "ufo", "bat"];
-  const type = types[Math.floor(Math.random() * (score > 2000 ? 3 : score > 800 ? 2 : 1))];
-  return {
-    id, x: Math.random() * (W - 52),
-    y: camY - 80 - Math.random() * 200,
-    w: type === "ufo" ? 52 : type === "bat" ? 44 : 48,
-    h: type === "ufo" ? 30 : type === "bat" ? 26 : 28,
-    vx: (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 1.5),
-    type, alive: true, frame: 0, hp: type === "ufo" ? 2 : 1,
-  };
+  const zone = getZone(score);
+  // zone 0+: worm; zone 1+: bat; zone 2+: ufo
+  const available: Array<"worm"|"ufo"|"bat"> = zone >= 2 ? ["worm","ufo","bat"] : zone >= 1 ? ["worm","bat"] : ["worm"];
+  const type = available[Math.floor(Math.random() * available.length)];
+  return { id, x: Math.random() * (W - 52), y: camY - 80 - Math.random() * 200, w: type === "ufo" ? 52 : type === "bat" ? 44 : 48, h: type === "ufo" ? 30 : type === "bat" ? 26 : 28, vx: (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 1.5), type, alive: true, frame: 0, hp: type === "ufo" ? 2 : 1 };
 }
 
 function init(hi: number): GS {
@@ -94,13 +100,14 @@ function init(hi: number): GS {
   platforms.push({ id: 0, x: W / 2 - PW / 2, y: H - 100, w: PW + 10, h: PH, type: "normal", vx: 0, cracked: false, crackedTimer: 0, bounceTimer: 0, used: false });
   for (let i = 1; i < 18; i++) platforms.push(makePlat(i + 1, 0, H - 100 - i * 50, 0));
   return {
-    phase: "menu",
-    px: W / 2 - PLAYER_W / 2, py: H - 100 - PLAYER_H - 2,
+    phase: "menu", px: W / 2 - PLAYER_W / 2, py: H - 100 - PLAYER_H - 2,
     pvx: 0, pvy: 0, pface: 1, animT: 0,
     platforms, monsters: [], particles: [], floats: [], powerups: [],
     score: 0, hi, camY: 0, scrolled: 0,
     keys: {}, touchTargetX: null, tiltX: 0,
     jetpack: 0, hat: 0,
+    combo: 0, comboTimer: 0,
+    zone: 0, zoneTimer: 0,
     pid: 20, mid: 0, fid: 0, puid: 0, pcid: 0, frameN: 0,
   };
 }
@@ -112,27 +119,13 @@ function addParticles(gs: GS, x: number, y: number, color: string, n = 8) {
     gs.particles.push({ id: gs.pcid++, x, y, vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd - 1.5, life: 1, color, r: 3 + Math.random() * 4 });
   }
 }
-
-function addFloat(gs: GS, x: number, y: number, text: string, color: string) {
-  gs.floats.push({ id: gs.fid++, x, y, vy: -1.5, text, life: 1, color });
+function addFloat(gs: GS, x: number, y: number, text: string, color: string, big = false) {
+  gs.floats.push({ id: gs.fid++, x, y, vy: big ? -2.2 : -1.5, text, life: 1, color, big });
 }
-
 function addTrail(gs: GS, x: number, y: number, color: string, speed: number) {
   const n = Math.random() < 0.6 ? 1 : 2;
   for (let i = 0; i < n; i++) {
-    const spreadX = (Math.random() - 0.5) * 2.5;
-    const spreadY = (Math.random() - 0.5) * 2.5;
-    gs.particles.push({
-      id: gs.pcid++,
-      x: x + spreadX,
-      y: y + spreadY,
-      vx: -speed * 0.18 + (Math.random() - 0.5) * 1.2,
-      vy: -0.4 + (Math.random() - 0.5) * 0.8,
-      life: 0.55 + Math.random() * 0.35,
-      color,
-      r: 2.5 + Math.random() * 2.5,
-      trail: true,
-    });
+    gs.particles.push({ id: gs.pcid++, x: x + (Math.random() - 0.5) * 2.5, y: y + (Math.random() - 0.5) * 2.5, vx: -speed * 0.18 + (Math.random() - 0.5) * 1.2, vy: -0.4 + (Math.random() - 0.5) * 0.8, life: 0.55 + Math.random() * 0.35, color, r: 2.5 + Math.random() * 2.5, trail: true });
   }
 }
 
@@ -143,72 +136,152 @@ export default function Game() {
   const hiRef = useRef(parseInt(localStorage.getItem("djhi") || "0", 10));
 
   const startGame = useCallback(() => {
-    const gs = init(hiRef.current);
-    gs.phase = "playing";
-    gsRef.current = gs;
+    const gs = init(hiRef.current); gs.phase = "playing"; gsRef.current = gs;
   }, []);
 
-  // Keyboard
   useEffect(() => {
     gsRef.current = init(hiRef.current);
     const onKey = (e: KeyboardEvent) => {
       gsRef.current.keys[e.code] = e.type === "keydown";
-      if (e.type === "keydown" && (e.code === "Space" || e.code === "Enter"))
-        if (gsRef.current.phase !== "playing") startGame();
+      if (e.type === "keydown" && (e.code === "Space" || e.code === "Enter") && gsRef.current.phase !== "playing") startGame();
     };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keyup", onKey);
+    window.addEventListener("keydown", onKey); window.addEventListener("keyup", onKey);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKey); };
   }, [startGame]);
 
-  // Tilt
   useEffect(() => {
-    const onTilt = (e: DeviceOrientationEvent) => {
-      if (e.gamma === null) return;
-      gsRef.current.tiltX = Math.max(-1, Math.min(1, e.gamma / 25));
-    };
+    const onTilt = (e: DeviceOrientationEvent) => { if (e.gamma !== null) gsRef.current.tiltX = Math.max(-1, Math.min(1, e.gamma / 25)); };
     window.addEventListener("deviceorientation", onTilt);
     return () => window.removeEventListener("deviceorientation", onTilt);
   }, []);
 
-  // Game loop
   useEffect(() => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
-
     function toScreen(worldY: number) { return worldY - gsRef.current.camY; }
 
-    // ── BACKGROUND ──────────────────────────────────────────────
-    function drawBg() {
-      const gs = gsRef.current;
-      const paperGrad = ctx.createRadialGradient(W / 2, H / 2, 60, W / 2, H / 2, Math.max(W, H) * 0.75);
-      paperGrad.addColorStop(0, "#fefaf2"); paperGrad.addColorStop(0.6, "#faf5e8"); paperGrad.addColorStop(1, "#f0e8d8");
-      ctx.fillStyle = paperGrad; ctx.fillRect(0, 0, W, H);
-      [{ x: 0, y: 0, c: "rgba(180,210,255,0.13)" }, { x: W, y: 0, c: "rgba(255,200,220,0.12)" }, { x: 0, y: H, c: "rgba(200,255,200,0.10)" }, { x: W, y: H, c: "rgba(255,230,180,0.12)" }].forEach(({ x, y, c }) => {
-        const g = ctx.createRadialGradient(x, y, 0, x, y, 200); g.addColorStop(0, c); g.addColorStop(1, "transparent");
-        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-      });
+    // ── BACKGROUNDS ─────────────────────────────────────────────
+    // Shared decorative elements per zone (clouds, stars, bubbles)
+    const decorItems: { x: number; y: number; r: number; spd: number; phase: number }[] = [];
+    for (let i = 0; i < 30; i++) decorItems.push({ x: Math.random() * W, y: Math.random() * H, r: 10 + Math.random() * 30, spd: 0.2 + Math.random() * 0.4, phase: Math.random() * Math.PI * 2 });
+
+    function drawBgNotebook(gs: GS) {
+      const g = ctx.createRadialGradient(W / 2, H / 2, 60, W / 2, H / 2, Math.max(W, H) * 0.75);
+      g.addColorStop(0, "#fefaf2"); g.addColorStop(0.6, "#faf5e8"); g.addColorStop(1, "#f0e8d8");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
       const gridSize = 28; const offsetY = (gs.scrolled * 0.3) % gridSize;
       ctx.lineCap = "round";
       for (let i = 0; i < Math.ceil(H / gridSize) + 2; i++) {
-        const y = -gridSize + offsetY + i * gridSize;
-        const isMajor = i % 4 === 0;
-        ctx.strokeStyle = isMajor ? "rgba(150,190,230,0.55)" : "rgba(170,205,240,0.38)";
-        ctx.lineWidth = isMajor ? 1.1 : 0.8;
+        const y = -gridSize + offsetY + i * gridSize; const isMajor = i % 4 === 0;
+        ctx.strokeStyle = isMajor ? "rgba(150,190,230,0.55)" : "rgba(170,205,240,0.38)"; ctx.lineWidth = isMajor ? 1.1 : 0.8;
         const wobble = Math.sin(i * 3.7 + gs.scrolled * 0.001) * 0.6;
-        ctx.beginPath(); ctx.moveTo(0, y + wobble);
-        ctx.bezierCurveTo(W * 0.25, y + Math.sin(i + 1.2) * 0.8 + wobble, W * 0.75, y + Math.sin(i + 2.4) * 0.8 + wobble, W, y + wobble * 0.5);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, y + wobble); ctx.bezierCurveTo(W * 0.25, y + Math.sin(i + 1.2) * 0.8 + wobble, W * 0.75, y + Math.sin(i + 2.4) * 0.8 + wobble, W, y + wobble * 0.5); ctx.stroke();
       }
       ctx.lineWidth = 0.6; ctx.strokeStyle = "rgba(170,205,240,0.22)";
       for (let x = gridSize; x < W; x += gridSize) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
     }
 
+    function drawBgClouds(gs: GS) {
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, "#a8d8ff"); g.addColorStop(0.5, "#c8eaff"); g.addColorStop(1, "#e8f6ff");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      // Drifting clouds
+      decorItems.forEach((d, i) => {
+        const cx = (d.x + gs.scrolled * d.spd * 0.1) % (W + 80) - 40;
+        const cy = d.y;
+        ctx.globalAlpha = 0.55 + Math.sin(d.phase + gs.frameN * 0.008) * 0.15;
+        ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.ellipse(cx, cy, d.r * 1.8, d.r * 0.9, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx - d.r * 0.7, cy + d.r * 0.2, d.r * 1.1, d.r * 0.75, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx + d.r * 0.8, cy + d.r * 0.1, d.r * 1.0, d.r * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+        if (i < 3) { // Sunbeams
+          ctx.globalAlpha = 0.06; ctx.fillStyle = "#ffe080";
+          ctx.beginPath(); ctx.moveTo(W * 0.8, -20);
+          const spreadAngle = (i - 1) * 0.25;
+          ctx.lineTo(W * 0.8 + Math.cos(1.4 + spreadAngle) * 700, Math.sin(1.4 + spreadAngle) * 700);
+          ctx.lineTo(W * 0.8 + Math.cos(1.5 + spreadAngle) * 700, Math.sin(1.5 + spreadAngle) * 700);
+          ctx.fill();
+        }
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    function drawBgSpace(gs: GS) {
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, "#080418"); g.addColorStop(0.5, "#0e0828"); g.addColorStop(1, "#180840");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      // Stars
+      decorItems.forEach((d, i) => {
+        const blink = 0.6 + Math.sin(d.phase + gs.frameN * 0.04 + i) * 0.4;
+        ctx.globalAlpha = blink;
+        const starSize = d.r * 0.18;
+        const sx = d.x; const sy = (d.y + gs.scrolled * 0.05) % H;
+        ctx.fillStyle = i % 5 === 0 ? "#ffeecc" : i % 5 === 1 ? "#ccddff" : "#ffffff";
+        ctx.beginPath(); ctx.arc(sx, sy, starSize, 0, Math.PI * 2); ctx.fill();
+        if (i % 8 === 0) { // Cross sparkle for big stars
+          ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 0.5; ctx.globalAlpha = blink * 0.5;
+          ctx.beginPath(); ctx.moveTo(sx - starSize * 3, sy); ctx.lineTo(sx + starSize * 3, sy); ctx.moveTo(sx, sy - starSize * 3); ctx.lineTo(sx, sy + starSize * 3); ctx.stroke();
+        }
+      });
+      // Nebula glow
+      ctx.globalAlpha = 0.07 + Math.sin(gs.frameN * 0.005) * 0.03;
+      const nb = ctx.createRadialGradient(W * 0.3, H * 0.4, 0, W * 0.3, H * 0.4, 200);
+      nb.addColorStop(0, "#8040ff"); nb.addColorStop(1, "transparent");
+      ctx.fillStyle = nb; ctx.fillRect(0, 0, W, H);
+      const nb2 = ctx.createRadialGradient(W * 0.7, H * 0.7, 0, W * 0.7, H * 0.7, 160);
+      nb2.addColorStop(0, "#ff4080"); nb2.addColorStop(1, "transparent");
+      ctx.fillStyle = nb2; ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+
+    function drawBgOcean(gs: GS) {
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, "#001428"); g.addColorStop(0.5, "#002840"); g.addColorStop(1, "#003858");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      // Caustic light patterns
+      ctx.globalAlpha = 0.06;
+      for (let i = 0; i < 8; i++) {
+        const cx = (i * 55 + gs.frameN * 0.3 + Math.sin(i) * 30) % W;
+        const cy = (i * 80 + gs.scrolled * 0.2) % H;
+        const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, 60 + Math.sin(gs.frameN * 0.02 + i) * 20);
+        cg.addColorStop(0, "#80ffee"); cg.addColorStop(1, "transparent");
+        ctx.fillStyle = cg; ctx.fillRect(0, 0, W, H);
+      }
+      // Bubbles
+      decorItems.forEach((d, i) => {
+        if (i >= 15) return;
+        const by = ((d.y - gs.scrolled * d.spd * 0.2 + gs.frameN * d.spd) % (H + 40));
+        const bx = d.x + Math.sin(d.phase + gs.frameN * 0.02) * 12;
+        ctx.globalAlpha = 0.18 + Math.sin(d.phase + gs.frameN * 0.03) * 0.08;
+        ctx.strokeStyle = "#80ddff"; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(bx, by, d.r * 0.35, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = "rgba(180,240,255,0.15)"; ctx.fill();
+      });
+      // Seaweed sway
+      ctx.globalAlpha = 0.25; ctx.strokeStyle = "#20c060"; ctx.lineWidth = 3; ctx.lineCap = "round";
+      for (let i = 0; i < 5; i++) {
+        const wx = 30 + i * 80; const sway = Math.sin(gs.frameN * 0.03 + i) * 15;
+        ctx.beginPath(); ctx.moveTo(wx, H); ctx.quadraticCurveTo(wx + sway, H - 30, wx + sway * 0.5, H - 60); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function drawBg() {
+      const gs = gsRef.current;
+      const z = gs.zone;
+      if (z === 0) drawBgNotebook(gs);
+      else if (z === 1) drawBgClouds(gs);
+      else if (z === 2) drawBgSpace(gs);
+      else drawBgOcean(gs);
+    }
+
     // ── PLATFORM ────────────────────────────────────────────────
     function drawPlatform(p: Platform) {
+      const gs = gsRef.current;
       const sy = toScreen(p.y);
       if (sy > H + 30 || sy < -50) return;
       const bounce = p.bounceTimer > 0 ? Math.sin(p.bounceTimer * 0.6) * 5 : 0;
+      const zc = ZONE_PLAT_COLORS[gs.zone];
       ctx.save(); ctx.translate(p.x + p.w / 2, sy + p.h / 2 - bounce * 0.5);
       if (p.type === "spring") {
         const g = ctx.createLinearGradient(0, -p.h / 2, 0, p.h / 2);
@@ -222,15 +295,9 @@ export default function Game() {
       } else if (p.type === "broken" || p.cracked) {
         ctx.fillStyle = p.cracked ? "#a06830" : "#c87840"; ctx.strokeStyle = "#7a4818"; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 5); ctx.fill(); ctx.stroke();
-        ctx.strokeStyle = "#7a4818"; ctx.lineWidth = 1.5;
-        if (p.cracked) {
-          ctx.globalAlpha = 1 - p.crackedTimer / 30;
-          ctx.beginPath(); ctx.moveTo(-p.w / 4, -p.h / 2); ctx.lineTo(-p.w / 6, p.h / 2); ctx.moveTo(p.w / 5, -p.h / 2 + 2); ctx.lineTo(p.w / 3, p.h / 2); ctx.moveTo(0, -p.h / 2); ctx.lineTo(-p.w / 8, p.h / 2); ctx.stroke();
-        } else {
-          ctx.beginPath(); ctx.moveTo(-10, -p.h / 2 + 3); ctx.lineTo(-5, p.h / 2 - 2); ctx.moveTo(10, -p.h / 2 + 2); ctx.lineTo(6, p.h / 2 - 3); ctx.stroke();
-        }
+        if (p.cracked) { ctx.globalAlpha = 1 - p.crackedTimer / 30; ctx.strokeStyle = "#7a4818"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-p.w / 4, -p.h / 2); ctx.lineTo(-p.w / 6, p.h / 2); ctx.moveTo(p.w / 5, -p.h / 2 + 2); ctx.lineTo(p.w / 3, p.h / 2); ctx.moveTo(0, -p.h / 2); ctx.lineTo(-p.w / 8, p.h / 2); ctx.stroke(); }
+        else { ctx.strokeStyle = "#7a4818"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-10, -p.h / 2 + 3); ctx.lineTo(-5, p.h / 2 - 2); ctx.moveTo(10, -p.h / 2 + 2); ctx.lineTo(6, p.h / 2 - 3); ctx.stroke(); }
         ctx.globalAlpha = 1;
-        ctx.fillStyle = "rgba(255,200,140,0.3)"; ctx.fillRect(-p.w / 2 + 4, -p.h / 2 + 3, p.w - 8, 3);
       } else if (p.type === "moving") {
         const g = ctx.createLinearGradient(0, -p.h / 2, 0, p.h / 2);
         g.addColorStop(0, "#80c8ff"); g.addColorStop(0.5, "#2090e8"); g.addColorStop(1, "#0060b8");
@@ -246,11 +313,12 @@ export default function Game() {
         ctx.beginPath(); ctx.ellipse(p.w / 4, -p.h / 2 - 5, 12, 8, 0, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
       } else {
+        // Normal platform — zone-colored
         const g = ctx.createLinearGradient(0, -p.h / 2, 0, p.h / 2);
-        g.addColorStop(0, "#90e870"); g.addColorStop(0.5, "#38c020"); g.addColorStop(1, "#208010");
-        ctx.fillStyle = g; ctx.strokeStyle = "#186010"; ctx.lineWidth = 2;
+        g.addColorStop(0, zc[0]); g.addColorStop(0.5, zc[1]); g.addColorStop(1, zc[2]);
+        ctx.fillStyle = g; ctx.strokeStyle = zc[3]; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 7); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.fillRect(-p.w / 2 + 5, -p.h / 2 + 3, p.w - 10, 4);
+        ctx.fillStyle = zc[4]; ctx.fillRect(-p.w / 2 + 5, -p.h / 2 + 3, p.w - 10, 4);
       }
       ctx.restore();
     }
@@ -261,14 +329,12 @@ export default function Game() {
       const f = gs.pface; const t = gs.animT;
       const falling = gs.pvy > 2; const rising = gs.pvy < -3;
       ctx.save(); ctx.translate(sx + PLAYER_W / 2, sy + PLAYER_H / 2 - 4); ctx.scale(f, 1);
-      const sqX = rising ? 0.84 : falling ? 1.12 : 1;
-      const sqY = rising ? 1.16 : falling ? 0.88 : 1;
+      const sqX = rising ? 0.84 : falling ? 1.12 : 1; const sqY = rising ? 1.16 : falling ? 0.88 : 1;
       ctx.scale(sqX * 0.68, sqY * 0.68);
       if (gs.jetpack > 0) {
         ctx.fillStyle = "#cc3010"; ctx.strokeStyle = "#881000"; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.roundRect(-28, -10, 10, 22, 4); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = "#ff5020";
-        ctx.beginPath(); ctx.moveTo(-27, 12); ctx.lineTo(-22, 12 + 10 + Math.sin(t * 0.5) * 5); ctx.lineTo(-17, 12); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#ff5020"; ctx.beginPath(); ctx.moveTo(-27, 12); ctx.lineTo(-22, 12 + 10 + Math.sin(t * 0.5) * 5); ctx.lineTo(-17, 12); ctx.closePath(); ctx.fill();
       }
       const footKick = rising ? -6 : falling ? 4 : Math.sin(t * 0.2) * 3;
       ctx.strokeStyle = "#186004"; ctx.lineWidth = 1.5; ctx.fillStyle = "#50cc20";
@@ -285,13 +351,11 @@ export default function Game() {
       ctx.beginPath(); ctx.ellipse(4, -4, 2, 1.5, 0.2, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = "#0a4000"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
       ctx.beginPath(); ctx.moveTo(-12, 5); ctx.quadraticCurveTo(0, 15, 12, 5); ctx.stroke();
-      ctx.fillStyle = "#bb1a3a";
-      ctx.beginPath(); ctx.moveTo(-9, 6); ctx.quadraticCurveTo(0, 14, 9, 6); ctx.quadraticCurveTo(0, 10, -9, 6); ctx.fill();
+      ctx.fillStyle = "#bb1a3a"; ctx.beginPath(); ctx.moveTo(-9, 6); ctx.quadraticCurveTo(0, 14, 9, 6); ctx.quadraticCurveTo(0, 10, -9, 6); ctx.fill();
       const wag = Math.sin(t * 0.22) * 2.5;
       ctx.fillStyle = "#ff3d88"; ctx.strokeStyle = "#cc1060"; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(-3, 11); ctx.quadraticCurveTo(wag * 0.4, 14, 1, 20 + wag); ctx.quadraticCurveTo(4 + wag, 24 + wag, 0, 24 + wag); ctx.quadraticCurveTo(-4 + wag, 24 + wag, -1, 20 + wag); ctx.quadraticCurveTo(wag * 0.3, 14, 3, 11); ctx.fill(); ctx.stroke();
-      ctx.strokeStyle = "#ff70bb"; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(0, 21 + wag); ctx.lineTo(0, 24 + wag); ctx.stroke();
+      ctx.strokeStyle = "#ff70bb"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, 21 + wag); ctx.lineTo(0, 24 + wag); ctx.stroke();
       [[-9, "#88f044"], [9, "#88f044"]].forEach(([ex, c]) => {
         const eGrad = ctx.createRadialGradient(ex as number, -19, 1, ex as number, -19, 11);
         eGrad.addColorStop(0, c as string); eGrad.addColorStop(0.7, "#4acc18"); eGrad.addColorStop(1, "#2a8808");
@@ -317,10 +381,7 @@ export default function Game() {
         ctx.fillStyle = "#3333ee"; ctx.beginPath(); ctx.roundRect(-8, -46, 16, 15, 4); ctx.fill(); ctx.stroke();
         ctx.fillStyle = "#6677ff"; ctx.fillRect(-8, -44, 16, 4);
         ctx.save(); ctx.translate(0, -48); ctx.rotate(spin);
-        ["#ff4040", "#44cc44", "#4444ff", "#ff44cc"].forEach((c, i) => {
-          ctx.fillStyle = c; ctx.save(); ctx.rotate((i * Math.PI) / 2);
-          ctx.beginPath(); ctx.ellipse(9, 0, 9, 3.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-        });
+        ["#ff4040", "#44cc44", "#4444ff", "#ff44cc"].forEach((c, i) => { ctx.fillStyle = c; ctx.save(); ctx.rotate((i * Math.PI) / 2); ctx.beginPath(); ctx.ellipse(9, 0, 9, 3.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
         ctx.fillStyle = "#ccc"; ctx.strokeStyle = "#888"; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
       }
@@ -342,9 +403,7 @@ export default function Game() {
         ctx.fillStyle = "#111"; ctx.beginPath(); ctx.ellipse(13, -5, 3, 3, 0, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.ellipse(14, -6, 1, 1, 0, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "#cc0000";
-        for (let i = -2; i <= 2; i++) {
-          ctx.beginPath(); ctx.moveTo(i * 7, -14); ctx.lineTo(i * 7 - 3, -22); ctx.lineTo(i * 7 + 3, -22); ctx.closePath(); ctx.fill();
-        }
+        for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * 7, -14); ctx.lineTo(i * 7 - 3, -22); ctx.lineTo(i * 7 + 3, -22); ctx.closePath(); ctx.fill(); }
       } else if (m.type === "ufo") {
         const bob = Math.sin(m.frame * 0.04) * 4;
         ctx.save(); ctx.translate(0, bob);
@@ -368,11 +427,8 @@ export default function Game() {
         ctx.save(); ctx.rotate(-flap);
         ctx.beginPath(); ctx.moveTo(-22, 0); ctx.quadraticCurveTo(-15, -12, 0, -4); ctx.quadraticCurveTo(15, -12, 22, 0); ctx.quadraticCurveTo(12, 10, 0, 6); ctx.quadraticCurveTo(-12, 10, -22, 0); ctx.fill(); ctx.stroke();
         ctx.restore();
-        ctx.fillStyle = "#883399";
-        ctx.beginPath(); ctx.ellipse(0, -2, 10, 8, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#ffdd00";
-        ctx.beginPath(); ctx.arc(-4, -4, 3, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(4, -4, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#883399"; ctx.beginPath(); ctx.ellipse(0, -2, 10, 8, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ffdd00"; ctx.beginPath(); ctx.arc(-4, -4, 3, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(4, -4, 3, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(-4, -4, 1.5, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(4, -4, 1.5, 0, Math.PI * 2); ctx.fill();
       }
       ctx.restore();
@@ -381,11 +437,33 @@ export default function Game() {
     // ── HUD ─────────────────────────────────────────────────────
     function drawHUD(gs: GS) {
       ctx.save();
+      // Score panel
       ctx.fillStyle = "rgba(255,255,255,0.82)";
       ctx.beginPath(); ctx.roundRect(8, 8, 120, 38, 10); ctx.fill();
       ctx.fillStyle = "#2a7010"; ctx.font = "bold 13px 'Comic Sans MS', cursive"; ctx.textAlign = "left";
       ctx.fillText(`Score: ${gs.score}`, 16, 24);
       ctx.fillStyle = "#a05010"; ctx.fillText(`Best: ${gs.hi}`, 16, 40);
+
+      // Zone badge (top center)
+      const z = ZONES[gs.zone];
+      ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.beginPath(); ctx.roundRect(W / 2 - 60, 8, 120, 22, 10); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 11px 'Comic Sans MS', cursive"; ctx.textAlign = "center";
+      ctx.fillText(`${z.emoji} ${z.name}`, W / 2, 23);
+
+      // Combo indicator
+      if (gs.combo >= 2) {
+        const pulse = 1 + Math.sin(gs.frameN * 0.25) * 0.08;
+        const comboColors = ["", "", "#ff9020", "#ff5010", "#dd2090", "#aa00ff"];
+        const col = comboColors[Math.min(gs.combo, comboColors.length - 1)] || "#aa00ff";
+        ctx.save();
+        ctx.translate(W / 2, 50); ctx.scale(pulse, pulse);
+        ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.roundRect(-52, -16, 104, 28, 12); ctx.fill();
+        ctx.fillStyle = col; ctx.font = `bold 18px 'Comic Sans MS', cursive`; ctx.textAlign = "center";
+        ctx.fillText(`🔥 x${gs.combo} COMBO!`, 0, 6);
+        ctx.restore();
+      }
+
+      // Power-up timers
       if (gs.jetpack > 0) {
         ctx.fillStyle = "rgba(255,255,255,0.82)"; ctx.beginPath(); ctx.roundRect(W - 110, 8, 102, 24, 8); ctx.fill();
         ctx.fillStyle = "#cc3010"; ctx.font = "bold 12px sans-serif"; ctx.textAlign = "right";
@@ -399,37 +477,58 @@ export default function Game() {
       ctx.restore();
     }
 
+    // ── ZONE TRANSITION BANNER ───────────────────────────────────
+    function drawZoneBanner(gs: GS) {
+      if (gs.zoneTimer <= 0) return;
+      const z = ZONES[gs.zone];
+      const progress = gs.zoneTimer / 220; // 0→1 fade
+      const alpha = progress < 0.15 ? progress / 0.15 : progress > 0.7 ? (1 - progress) / 0.3 : 1;
+      const slideY = progress < 0.15 ? (1 - progress / 0.15) * -60 : 0;
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.95;
+      ctx.translate(0, slideY);
+      ctx.fillStyle = "rgba(10,5,30,0.78)";
+      ctx.beginPath(); ctx.roundRect(W / 2 - 160, H / 2 - 50, 320, 100, 20); ctx.fill();
+      // Glow border
+      ctx.strokeStyle = gs.zone === 1 ? "#ffe060" : gs.zone === 2 ? "#a060ff" : gs.zone === 3 ? "#40d0ff" : "#60e030";
+      ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 13px 'Comic Sans MS', cursive"; ctx.textAlign = "center";
+      ctx.fillText("ENTERING", W / 2, H / 2 - 18);
+      ctx.font = `bold 26px 'Comic Sans MS', cursive`;
+      ctx.fillStyle = gs.zone === 1 ? "#ffe060" : gs.zone === 2 ? "#c080ff" : gs.zone === 3 ? "#60e8ff" : "#80ff40";
+      ctx.fillText(`${z.emoji}  ${z.name}`, W / 2, H / 2 + 15);
+      ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "12px 'Comic Sans MS', cursive";
+      const subtitle = gs.zone === 1 ? "Drift among the clouds!" : gs.zone === 2 ? "UFOs patrol the void!" : gs.zone === 3 ? "Dive into the deep!" : "";
+      if (subtitle) ctx.fillText(subtitle, W / 2, H / 2 + 36);
+      ctx.restore();
+    }
+
     function drawMenu(gs: GS) {
       ctx.save();
-      ctx.fillStyle = "rgba(255,252,240,0.88)";
-      ctx.beginPath(); ctx.roundRect(W / 2 - 150, 100, 300, 230, 20); ctx.fill();
-      ctx.strokeStyle = "#38c020"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.roundRect(W / 2 - 150, 100, 300, 230, 20); ctx.stroke();
+      ctx.fillStyle = "rgba(255,252,240,0.88)"; ctx.beginPath(); ctx.roundRect(W / 2 - 150, 90, 300, 250, 20); ctx.fill();
+      ctx.strokeStyle = "#38c020"; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(W / 2 - 150, 90, 300, 250, 20); ctx.stroke();
       ctx.fillStyle = "#2a7010"; ctx.font = "bold 36px 'Comic Sans MS', cursive"; ctx.textAlign = "center";
-      ctx.fillText("Doodle Jump", W / 2, 155);
+      ctx.fillText("Doodle Jump", W / 2, 145);
       ctx.fillStyle = "#555"; ctx.font = "13px 'Comic Sans MS', cursive";
-      ctx.fillText("Drag finger left/right to move", W / 2, 185);
-      ctx.fillText("Stomp monsters from above!", W / 2, 205);
-      ctx.fillText("← → keys or tilt on mobile", W / 2, 225);
+      ctx.fillText("Drag finger left/right to move", W / 2, 175);
+      ctx.fillText("Stomp monsters from above!", W / 2, 195);
+      ctx.fillText("Chain stomps for COMBO bonus!", W / 2, 215);
+      ctx.fillText("4 worlds to explore!", W / 2, 235);
       const grad = ctx.createLinearGradient(W / 2 - 85, 0, W / 2 + 85, 0);
       grad.addColorStop(0, "#56d830"); grad.addColorStop(1, "#28a010");
-      ctx.fillStyle = grad; ctx.beginPath(); ctx.roundRect(W / 2 - 85, 238, 170, 48, 14); ctx.fill();
-      ctx.fillStyle = "#fff"; ctx.font = "bold 22px 'Comic Sans MS', cursive";
-      ctx.fillText("▶  PLAY", W / 2, 270);
-      if (gs.hi > 0) { ctx.fillStyle = "#a05010"; ctx.font = "bold 14px 'Comic Sans MS', cursive"; ctx.fillText(`Best: ${gs.hi}`, W / 2, 310); }
+      ctx.fillStyle = grad; ctx.beginPath(); ctx.roundRect(W / 2 - 85, 248, 170, 48, 14); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 22px 'Comic Sans MS', cursive"; ctx.fillText("▶  PLAY", W / 2, 280);
+      if (gs.hi > 0) { ctx.fillStyle = "#a05010"; ctx.font = "bold 14px 'Comic Sans MS', cursive"; ctx.fillText(`Best: ${gs.hi}`, W / 2, 322); }
       ctx.restore();
     }
 
     function drawGameOver(gs: GS) {
       ctx.save();
-      ctx.fillStyle = "rgba(255,245,230,0.92)";
-      ctx.beginPath(); ctx.roundRect(W / 2 - 140, 180, 280, 220, 18); ctx.fill();
-      ctx.strokeStyle = "#e05020"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.roundRect(W / 2 - 140, 180, 280, 220, 18); ctx.stroke();
+      ctx.fillStyle = "rgba(255,245,230,0.92)"; ctx.beginPath(); ctx.roundRect(W / 2 - 140, 180, 280, 220, 18); ctx.fill();
+      ctx.strokeStyle = "#e05020"; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(W / 2 - 140, 180, 280, 220, 18); ctx.stroke();
       ctx.fillStyle = "#c03010"; ctx.font = "bold 34px 'Comic Sans MS', cursive"; ctx.textAlign = "center";
       ctx.fillText("Game Over!", W / 2, 228);
-      ctx.fillStyle = "#444"; ctx.font = "18px 'Comic Sans MS', cursive";
-      ctx.fillText(`Score: ${gs.score}`, W / 2, 262);
+      ctx.fillStyle = "#444"; ctx.font = "18px 'Comic Sans MS', cursive"; ctx.fillText(`Score: ${gs.score}`, W / 2, 262);
       if (gs.score >= gs.hi && gs.score > 0) {
         ctx.fillStyle = "#d07000"; ctx.font = "bold 15px 'Comic Sans MS', cursive"; ctx.fillText("🏆 New Best!", W / 2, 285);
       } else {
@@ -438,8 +537,7 @@ export default function Game() {
       const grad = ctx.createLinearGradient(W / 2 - 80, 0, W / 2 + 80, 0);
       grad.addColorStop(0, "#56d830"); grad.addColorStop(1, "#28a010");
       ctx.fillStyle = grad; ctx.beginPath(); ctx.roundRect(W / 2 - 80, 305, 160, 48, 14); ctx.fill();
-      ctx.fillStyle = "#fff"; ctx.font = "bold 20px 'Comic Sans MS', cursive";
-      ctx.fillText("▶  PLAY AGAIN", W / 2, 337);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 20px 'Comic Sans MS', cursive"; ctx.fillText("▶  PLAY AGAIN", W / 2, 337);
       ctx.restore();
     }
 
@@ -453,13 +551,10 @@ export default function Game() {
       gs.powerups.forEach((pu) => {
         if (pu.collected) return;
         const sy = toScreen(pu.y);
-        ctx.save(); ctx.translate(pu.x + 15, sy + 15);
-        ctx.rotate(Math.sin(gs.frameN * 0.05) * 0.2);
+        ctx.save(); ctx.translate(pu.x + 15, sy + 15); ctx.rotate(Math.sin(gs.frameN * 0.05) * 0.2);
         if (pu.type === "jetpack") {
-          ctx.fillStyle = "#e04020"; ctx.fillRect(-10, -15, 20, 30);
-          ctx.fillStyle = "#ff8040"; ctx.fillRect(-6, -18, 12, 8);
-          ctx.fillStyle = "#ffcc00";
-          const fh = 8 + Math.sin(gs.frameN * 0.3) * 4;
+          ctx.fillStyle = "#e04020"; ctx.fillRect(-10, -15, 20, 30); ctx.fillStyle = "#ff8040"; ctx.fillRect(-6, -18, 12, 8);
+          ctx.fillStyle = "#ffcc00"; const fh = 8 + Math.sin(gs.frameN * 0.3) * 4;
           ctx.beginPath(); ctx.moveTo(-8, 15); ctx.lineTo(0, 15 + fh); ctx.lineTo(8, 15); ctx.fill();
         } else {
           ctx.fillStyle = "#4040dd"; ctx.beginPath(); ctx.ellipse(0, 5, 15, 4, 0, 0, Math.PI * 2); ctx.fill();
@@ -467,41 +562,45 @@ export default function Game() {
         }
         ctx.restore();
       });
-      // Draw trail particles first (below frog) with additive glow
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
+      // Trail particles (additive glow)
+      ctx.save(); ctx.globalCompositeOperation = "lighter";
       gs.particles.forEach((p) => {
         if (!p.trail) return;
-        const sy = toScreen(p.y);
-        const radius = p.r * p.life;
-        if (radius < 0.3) return;
+        const sy = toScreen(p.y); const radius = p.r * p.life; if (radius < 0.3) return;
         const grd = ctx.createRadialGradient(p.x, sy, 0, p.x, sy, radius * 2.2);
-        grd.addColorStop(0, p.color);
-        grd.addColorStop(0.55, p.color);
-        grd.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.globalAlpha = p.life * 0.85;
-        ctx.fillStyle = grd;
+        grd.addColorStop(0, p.color); grd.addColorStop(0.55, p.color); grd.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.globalAlpha = p.life * 0.85; ctx.fillStyle = grd;
         ctx.beginPath(); ctx.arc(p.x, sy, radius * 2.2, 0, Math.PI * 2); ctx.fill();
       });
       ctx.restore();
-      // Draw regular explosion particles normally
+      // Regular particles
       gs.particles.forEach((p) => {
         if (p.trail) return;
-        const sy = toScreen(p.y);
-        ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+        const sy = toScreen(p.y); ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
         ctx.beginPath(); ctx.arc(p.x, sy, p.r * p.life, 0, Math.PI * 2); ctx.fill();
       });
       ctx.globalAlpha = 1;
       gs.monsters.forEach(drawMonster);
       drawDoodler(gs);
+      // Floating texts
       gs.floats.forEach((f) => {
         const sy = toScreen(f.y);
         ctx.globalAlpha = f.life; ctx.fillStyle = f.color;
-        ctx.font = "bold 16px 'Comic Sans MS', cursive"; ctx.textAlign = "center";
-        ctx.fillText(f.text, f.x, sy);
+        if (f.big) {
+          ctx.save();
+          const scale = 1 + (1 - f.life) * 0.4;
+          ctx.translate(f.x, sy); ctx.scale(scale, scale);
+          ctx.font = "bold 22px 'Comic Sans MS', cursive"; ctx.textAlign = "center";
+          ctx.fillText(f.text, 0, 0);
+          ctx.restore();
+        } else {
+          ctx.font = "bold 16px 'Comic Sans MS', cursive"; ctx.textAlign = "center";
+          ctx.fillText(f.text, f.x, sy);
+        }
       });
       ctx.globalAlpha = 1;
       drawHUD(gs);
+      drawZoneBanner(gs);
       if (gs.phase === "dead") drawGameOver(gs);
     }
 
@@ -511,107 +610,92 @@ export default function Game() {
       gs.frameN++; gs.animT++;
       if (gs.phase !== "playing") return;
 
-      // ── Smooth touch drag movement ──
-      // Priority: keyboard > tilt > touch drag
+      // ── Movement ──
       const keyLeft = gs.keys["ArrowLeft"] || gs.keys["KeyA"];
       const keyRight = gs.keys["ArrowRight"] || gs.keys["KeyD"];
-
-      if (keyLeft) {
-        gs.pvx = Math.max(gs.pvx - 1.2, -MOVE_SPEED * 1.5);
-        gs.pface = -1;
-      } else if (keyRight) {
-        gs.pvx = Math.min(gs.pvx + 1.2, MOVE_SPEED * 1.5);
-        gs.pface = 1;
-      } else if (Math.abs(gs.tiltX) > 0.12) {
-        // Tilt: smooth proportional acceleration
+      if (keyLeft) { gs.pvx = Math.max(gs.pvx - 1.2, -MOVE_SPEED * 1.5); gs.pface = -1; }
+      else if (keyRight) { gs.pvx = Math.min(gs.pvx + 1.2, MOVE_SPEED * 1.5); gs.pface = 1; }
+      else if (Math.abs(gs.tiltX) > 0.12) {
         const tiltForce = gs.tiltX * 2.2;
         gs.pvx = Math.max(-MOVE_SPEED * 1.5, Math.min(MOVE_SPEED * 1.5, gs.pvx + tiltForce));
-        if (gs.tiltX < 0) gs.pface = -1;
-        if (gs.tiltX > 0) gs.pface = 1;
+        if (gs.tiltX < 0) gs.pface = -1; if (gs.tiltX > 0) gs.pface = 1;
       } else if (gs.touchTargetX !== null) {
-        // Touch drag: frog chases finger X position smoothly
         const frogCenterX = gs.px + PLAYER_W / 2;
         const delta = gs.touchTargetX - frogCenterX;
-        // Speed is proportional to distance, capped at MOVE_SPEED * 1.5
         const desired = Math.max(-MOVE_SPEED * 1.5, Math.min(MOVE_SPEED * 1.5, delta * 0.22));
-        gs.pvx += (desired - gs.pvx) * 0.28; // smooth lerp toward desired speed
-        if (delta < -2) gs.pface = -1;
-        else if (delta > 2) gs.pface = 1;
-      } else {
-        gs.pvx *= 0.82;
-      }
+        gs.pvx += (desired - gs.pvx) * 0.28;
+        if (delta < -2) gs.pface = -1; else if (delta > 2) gs.pface = 1;
+      } else { gs.pvx *= 0.82; }
 
       gs.px += gs.pvx;
       if (gs.px > W) gs.px = -PLAYER_W;
       if (gs.px + PLAYER_W < 0) gs.px = W;
 
-      // Gravity / jetpack / hat
-      if (gs.jetpack > 0) {
-        gs.jetpack--;
-        gs.pvy = Math.max(gs.pvy - 0.6, -11);
-        addParticles(gs, gs.px + PLAYER_W / 2, gs.py + PLAYER_H, "#ff8040", 1);
-      } else if (gs.hat > 0) {
-        gs.hat--;
-        gs.pvy = Math.max(gs.pvy - 0.3, -7);
-      } else {
-        gs.pvy += GRAVITY;
-      }
+      // ── Physics ──
+      if (gs.jetpack > 0) { gs.jetpack--; gs.pvy = Math.max(gs.pvy - 0.6, -11); addParticles(gs, gs.px + PLAYER_W / 2, gs.py + PLAYER_H, "#ff8040", 1); }
+      else if (gs.hat > 0) { gs.hat--; gs.pvy = Math.max(gs.pvy - 0.3, -7); }
+      else { gs.pvy += GRAVITY; }
       gs.py += gs.pvy;
 
-      // Camera
+      // ── Camera ──
       const screenPY = gs.py - gs.camY;
       if (screenPY < H / 2.5) {
-        const d = H / 2.5 - screenPY;
-        gs.camY -= d; gs.scrolled += d;
+        const d = H / 2.5 - screenPY; gs.camY -= d; gs.scrolled += d;
         gs.score = Math.max(gs.score, Math.floor(gs.scrolled / 4));
       }
 
-      // Speed trail emission
-      const absVx = Math.abs(gs.pvx);
-      const absVy = Math.abs(gs.pvy);
+      // ── Zone check ──
+      const newZone = Math.min(getZone(gs.score), ZONES.length - 1);
+      if (newZone !== gs.zone) {
+        gs.zone = newZone;
+        gs.zoneTimer = 220;
+        // Burst of thematic particles
+        for (let i = 0; i < 20; i++) addParticles(gs, Math.random() * W, gs.py - Math.random() * 100 + gs.camY, newZone === 1 ? "#ffe080" : newZone === 2 ? "#a060ff" : "#40d0ff", 1);
+      }
+      if (gs.zoneTimer > 0) gs.zoneTimer--;
+
+      // ── Combo timer ──
+      if (gs.comboTimer > 0) { gs.comboTimer--; if (gs.comboTimer === 0) gs.combo = 0; }
+
+      // ── Speed trail ──
+      const absVx = Math.abs(gs.pvx); const absVy = Math.abs(gs.pvy);
       const fastEnough = absVx > 2.8 || (gs.jetpack > 0 && absVy > 3) || (gs.hat > 0 && gs.pvy < -2);
       if (fastEnough) {
-        // Emit from the back-center of the frog body
         const trailX = gs.px + PLAYER_W / 2 + (gs.pvx > 0 ? -10 : 10);
         const trailY = gs.py + PLAYER_H * 0.55;
-        let color: string;
-        if (gs.jetpack > 0) {
-          color = Math.random() < 0.5 ? "#ff9030" : "#ffee60";
-        } else if (gs.hat > 0) {
-          color = Math.random() < 0.5 ? "#60ccff" : "#ffffff";
-        } else if (absVx > 5.5) {
-          color = Math.random() < 0.5 ? "#c0ff40" : "#ffffff";
-        } else {
-          color = Math.random() < 0.5 ? "#80ee20" : "#ccff88";
-        }
-        addTrail(gs, trailX, trailY, color, gs.pvx);
+        let col: string;
+        if (gs.jetpack > 0) col = Math.random() < 0.5 ? "#ff9030" : "#ffee60";
+        else if (gs.hat > 0) col = Math.random() < 0.5 ? "#60ccff" : "#ffffff";
+        else if (absVx > 5.5) col = Math.random() < 0.5 ? "#c0ff40" : "#ffffff";
+        else col = Math.random() < 0.5 ? "#80ee20" : "#ccff88";
+        addTrail(gs, trailX, trailY, col, gs.pvx);
       }
 
-      // Platform collisions
+      // ── Platform collisions ──
       if (gs.pvy > 0) {
         for (const p of gs.platforms) {
           const prevPy = gs.py - gs.pvy;
           const overlapsX = gs.px + 8 < p.x + p.w - 8 && gs.px + PLAYER_W - 8 > p.x + 8;
           const landedOn = prevPy + PLAYER_H <= p.y + 4 && gs.py + PLAYER_H >= p.y && gs.py + PLAYER_H <= p.y + p.h + 12;
           if (overlapsX && landedOn) {
-            if (p.type === "broken") {
-              if (!p.cracked) { p.cracked = true; p.crackedTimer = 0; } else continue;
-            }
+            if (p.type === "broken") { if (!p.cracked) { p.cracked = true; p.crackedTimer = 0; } else continue; }
             if (p.type === "disappear") p.used = true;
+            // Reset combo on landing
+            if (gs.combo > 0) { gs.combo = 0; gs.comboTimer = 0; }
             if (p.type === "spring") {
               gs.pvy = SPRING_JUMP; p.bounceTimer = 12;
               addParticles(gs, p.x + p.w / 2, p.y, "#ff6090", 8);
               addFloat(gs, p.x + p.w / 2, p.y - 20, "BOING!", "#e8305a");
             } else {
               gs.pvy = BASE_JUMP; p.bounceTimer = 8;
-              if (p.type !== "disappear") addParticles(gs, p.x + p.w / 2, p.y, "#70dd40", 4);
+              if (p.type !== "disappear") addParticles(gs, p.x + p.w / 2, p.y, ZONE_PLAT_COLORS[gs.zone][1], 4);
             }
             gs.py = p.y - PLAYER_H; break;
           }
         }
       }
 
-      // Update platforms
+      // ── Platform update ──
       gs.platforms.forEach((p) => {
         if (p.bounceTimer > 0) p.bounceTimer--;
         if (p.type === "moving") { p.x += p.vx; if (p.x <= 0 || p.x + p.w >= W) p.vx *= -1; }
@@ -628,11 +712,10 @@ export default function Game() {
         gs.platforms.push(makePlat(gs.pid++, 0, highest - platGap(gs.score), gs.score));
       }
 
-      // Powerups
+      // ── Powerups ──
       gs.powerups.forEach((pu) => {
         if (pu.collected) return;
-        const dx = gs.px + PLAYER_W / 2 - (pu.x + 15);
-        const dy = (gs.py + PLAYER_H / 2) - (pu.y + 15);
+        const dx = gs.px + PLAYER_W / 2 - (pu.x + 15); const dy = (gs.py + PLAYER_H / 2) - (pu.y + 15);
         if (Math.abs(dx) < 28 && Math.abs(dy) < 28) {
           pu.collected = true;
           if (pu.type === "jetpack") { gs.jetpack = 180; addFloat(gs, gs.px + PLAYER_W / 2, gs.py, "JETPACK!", "#e04020"); }
@@ -645,7 +728,7 @@ export default function Game() {
         gs.powerups.push({ id: gs.puid++, x: Math.random() * (W - 40), y: gs.camY - 100 - Math.random() * 150, type: Math.random() < 0.5 ? "jetpack" : "hat", collected: false });
       }
 
-      // Monsters
+      // ── Monsters ──
       if (gs.score > 300 && gs.monsters.filter((m) => m.alive).length < Math.min(Math.floor(gs.score / 800) + 1, 4) && Math.random() < 0.004) {
         gs.monsters.push(makeMonster(gs.mid++, gs.camY, gs.score));
       }
@@ -655,20 +738,31 @@ export default function Game() {
         if (m.x <= 0 || m.x + m.w >= W) m.vx *= -1;
         if (m.type === "ufo") m.y += Math.sin(m.frame * 0.04) * 0.8;
         if (m.type === "bat") m.y += Math.sin(m.frame * 0.06) * 1.2 - 0.1;
-
         const mRight = m.x + m.w; const mBottom = m.y + m.h;
         const pRight = gs.px + PLAYER_W; const pBottom = gs.py + PLAYER_H;
         const overlap = gs.px + 10 < mRight - 10 && pRight - 10 > m.x + 10 && gs.py + 8 < mBottom - 8 && pBottom - 8 > m.y + 8;
         if (overlap) {
-          // Stomp from above
           if (gs.pvy > 0 && gs.py + PLAYER_H < m.y + m.h * 0.55) {
+            // Stomp!
             m.hp--;
             if (m.hp <= 0) {
               m.alive = false;
+              // Combo calculation
+              gs.combo++;
+              gs.comboTimer = 180; // 3 seconds window for next stomp
+              const baseBonus = m.type === "ufo" ? 200 : m.type === "bat" ? 150 : 100;
+              const comboMult = gs.combo;
+              const totalBonus = baseBonus * comboMult;
+              gs.score += totalBonus;
               addParticles(gs, m.x + m.w / 2, m.y + m.h / 2, "#ff6030", 16);
-              const bonus = m.type === "ufo" ? 200 : m.type === "bat" ? 150 : 100;
-              gs.score += bonus;
-              addFloat(gs, m.x + m.w / 2, m.y, "+" + bonus, "#ff4020");
+              // Combo text
+              if (gs.combo >= 2) {
+                addFloat(gs, m.x + m.w / 2, m.y - 10, `x${comboMult} COMBO!  +${totalBonus}`, gs.combo >= 4 ? "#dd00ff" : gs.combo >= 3 ? "#ff4400" : "#ff9000", true);
+              } else {
+                addFloat(gs, m.x + m.w / 2, m.y - 10, `+${totalBonus}`, "#ff4020");
+              }
+              // Bigger particle burst for higher combos
+              if (gs.combo >= 3) addParticles(gs, m.x + m.w / 2, m.y + m.h / 2, gs.combo >= 4 ? "#dd00ff" : "#ff6000", 12);
             }
             gs.pvy = BASE_JUMP;
           } else {
@@ -678,12 +772,8 @@ export default function Game() {
       });
       gs.monsters = gs.monsters.filter((m) => m.alive && toScreen(m.y) < H + 80);
 
-      // Particles & floats
-      gs.particles.forEach((p) => {
-        p.x += p.vx; p.y += p.vy;
-        p.vy += p.trail ? 0.04 : 0.12;
-        p.life -= p.trail ? 0.07 : 0.025;
-      });
+      // ── Particles & floats ──
+      gs.particles.forEach((p) => { p.x += p.vx; p.y += p.vy; p.vy += p.trail ? 0.04 : 0.12; p.life -= p.trail ? 0.07 : 0.025; });
       gs.particles = gs.particles.filter((p) => p.life > 0);
       gs.floats.forEach((f) => { f.y += f.vy; f.life -= 0.018; });
       gs.floats = gs.floats.filter((f) => f.life > 0);
@@ -702,50 +792,30 @@ export default function Game() {
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  // Touch: track finger X and map to game coords
   const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    const gs = gsRef.current;
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const t = e.touches[0];
-    const mx = (t.clientX - rect.left) * (W / rect.width);
-    const my = (t.clientY - rect.top) * (H / rect.height);
-
-    if (gs.phase === "menu") {
-      if (mx > W / 2 - 85 && mx < W / 2 + 85 && my > 238 && my < 286) startGame();
-      return;
-    }
-    if (gs.phase === "dead") {
-      if (mx > W / 2 - 80 && mx < W / 2 + 80 && my > 305 && my < 353) startGame();
-      return;
-    }
+    const gs = gsRef.current; const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
+    const t = e.touches[0]; const mx = (t.clientX - rect.left) * (W / rect.width); const my = (t.clientY - rect.top) * (H / rect.height);
+    if (gs.phase === "menu") { if (mx > W / 2 - 85 && mx < W / 2 + 85 && my > 248 && my < 296) startGame(); return; }
+    if (gs.phase === "dead") { if (mx > W / 2 - 80 && mx < W / 2 + 80 && my > 305 && my < 353) startGame(); return; }
     gs.touchTargetX = mx;
   }, [startGame]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    const gs = gsRef.current;
-    if (gs.phase !== "playing") return;
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const t = e.touches[0];
-    gs.touchTargetX = (t.clientX - rect.left) * (W / rect.width);
+    const gs = gsRef.current; if (gs.phase !== "playing") return;
+    const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
+    const t = e.touches[0]; gs.touchTargetX = (t.clientX - rect.left) * (W / rect.width);
   }, []);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    gsRef.current.touchTargetX = null;
-    gsRef.current.pvx *= 0.5; // soften stop
+    e.preventDefault(); gsRef.current.touchTargetX = null; gsRef.current.pvx *= 0.5;
   }, []);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const gs = gsRef.current;
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const mx = (e.clientX - rect.left) * (W / rect.width);
-    const my = (e.clientY - rect.top) * (H / rect.height);
-    if (gs.phase === "menu" && mx > W / 2 - 85 && mx < W / 2 + 85 && my > 238 && my < 286) startGame();
+    const gs = gsRef.current; const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (W / rect.width); const my = (e.clientY - rect.top) * (H / rect.height);
+    if (gs.phase === "menu" && mx > W / 2 - 85 && mx < W / 2 + 85 && my > 248 && my < 296) startGame();
     if (gs.phase === "dead" && mx > W / 2 - 80 && mx < W / 2 + 80 && my > 305 && my < 353) startGame();
   }, [startGame]);
 
@@ -753,14 +823,9 @@ export default function Game() {
     <div style={{ width: "100vw", height: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#1a1a2e", overflow: "hidden" }}>
       <div style={{ position: "relative", borderRadius: "12px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,0,0,0.7), 0 0 0 3px #2a9010" }}>
         <canvas
-          ref={canvasRef}
-          width={W}
-          height={H}
+          ref={canvasRef} width={W} height={H}
           style={{ display: "block", maxHeight: "100dvh", maxWidth: "100vw", width: "auto", height: "auto", cursor: "default", touchAction: "none", userSelect: "none" }}
-          onClick={handleClick}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
+          onClick={handleClick} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
         />
       </div>
     </div>
