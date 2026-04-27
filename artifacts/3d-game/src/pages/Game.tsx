@@ -66,7 +66,7 @@ interface GS {
   // combo system
   combo: number; comboTimer: number;
   // world zone
-  zone: number; zoneTimer: number;
+  zone: number;
   pid: number; mid: number; fid: number; puid: number; pcid: number;
   frameN: number;
 }
@@ -107,7 +107,7 @@ function init(hi: number): GS {
     keys: {}, touchTargetX: null, tiltX: 0,
     jetpack: 0, hat: 0,
     combo: 0, comboTimer: 0,
-    zone: 0, zoneTimer: 0,
+    zone: 0,
     pid: 20, mid: 0, fid: 0, puid: 0, pcid: 0, frameN: 0,
   };
 }
@@ -477,32 +477,6 @@ export default function Game() {
       ctx.restore();
     }
 
-    // ── ZONE TRANSITION BANNER ───────────────────────────────────
-    function drawZoneBanner(gs: GS) {
-      if (gs.zoneTimer <= 0) return;
-      const z = ZONES[gs.zone];
-      const progress = gs.zoneTimer / 220; // 0→1 fade
-      const alpha = progress < 0.15 ? progress / 0.15 : progress > 0.7 ? (1 - progress) / 0.3 : 1;
-      const slideY = progress < 0.15 ? (1 - progress / 0.15) * -60 : 0;
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.95;
-      ctx.translate(0, slideY);
-      ctx.fillStyle = "rgba(10,5,30,0.78)";
-      ctx.beginPath(); ctx.roundRect(W / 2 - 160, H / 2 - 50, 320, 100, 20); ctx.fill();
-      // Glow border
-      ctx.strokeStyle = gs.zone === 1 ? "#ffe060" : gs.zone === 2 ? "#a060ff" : gs.zone === 3 ? "#40d0ff" : "#60e030";
-      ctx.lineWidth = 2.5; ctx.stroke();
-      ctx.fillStyle = "#fff"; ctx.font = "bold 13px 'Comic Sans MS', cursive"; ctx.textAlign = "center";
-      ctx.fillText("ENTERING", W / 2, H / 2 - 18);
-      ctx.font = `bold 26px 'Comic Sans MS', cursive`;
-      ctx.fillStyle = gs.zone === 1 ? "#ffe060" : gs.zone === 2 ? "#c080ff" : gs.zone === 3 ? "#60e8ff" : "#80ff40";
-      ctx.fillText(`${z.emoji}  ${z.name}`, W / 2, H / 2 + 15);
-      ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "12px 'Comic Sans MS', cursive";
-      const subtitle = gs.zone === 1 ? "Drift among the clouds!" : gs.zone === 2 ? "UFOs patrol the void!" : gs.zone === 3 ? "Dive into the deep!" : "";
-      if (subtitle) ctx.fillText(subtitle, W / 2, H / 2 + 36);
-      ctx.restore();
-    }
-
     function drawMenu(gs: GS) {
       ctx.save();
       ctx.fillStyle = "rgba(255,252,240,0.88)"; ctx.beginPath(); ctx.roundRect(W / 2 - 150, 90, 300, 250, 20); ctx.fill();
@@ -600,7 +574,6 @@ export default function Game() {
       });
       ctx.globalAlpha = 1;
       drawHUD(gs);
-      drawZoneBanner(gs);
       if (gs.phase === "dead") drawGameOver(gs);
     }
 
@@ -648,11 +621,7 @@ export default function Game() {
       const newZone = Math.min(getZone(gs.score), ZONES.length - 1);
       if (newZone !== gs.zone) {
         gs.zone = newZone;
-        gs.zoneTimer = 220;
-        // Burst of thematic particles
-        for (let i = 0; i < 20; i++) addParticles(gs, Math.random() * W, gs.py - Math.random() * 100 + gs.camY, newZone === 1 ? "#ffe080" : newZone === 2 ? "#a060ff" : "#40d0ff", 1);
       }
-      if (gs.zoneTimer > 0) gs.zoneTimer--;
 
       // ── Combo timer ──
       if (gs.comboTimer > 0) { gs.comboTimer--; if (gs.comboTimer === 0) gs.combo = 0; }
