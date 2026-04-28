@@ -21,6 +21,152 @@ function getZone(score: number) {
   return z;
 }
 
+// ── SOUND ENGINE (Web Audio synthesis, no files needed) ──────────
+let _ac: AudioContext | null = null;
+function ac(): AudioContext {
+  if (!_ac) _ac = new AudioContext();
+  if (_ac.state === "suspended") _ac.resume();
+  return _ac;
+}
+
+function sfxJump() {
+  try {
+    const c = ac(); const t = c.currentTime;
+    const o = c.createOscillator(); const g = c.createGain();
+    o.connect(g); g.connect(c.destination);
+    o.type = "sine";
+    o.frequency.setValueAtTime(190, t);
+    o.frequency.exponentialRampToValueAtTime(460, t + 0.07);
+    o.frequency.exponentialRampToValueAtTime(340, t + 0.13);
+    g.gain.setValueAtTime(0.22, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    o.start(t); o.stop(t + 0.15);
+  } catch (_) { /* silently ignore if audio is blocked */ }
+}
+
+function sfxSpring() {
+  try {
+    const c = ac(); const t = c.currentTime;
+    const o = c.createOscillator(); const g = c.createGain();
+    o.connect(g); g.connect(c.destination);
+    o.type = "sine";
+    o.frequency.setValueAtTime(260, t);
+    o.frequency.exponentialRampToValueAtTime(1100, t + 0.1);
+    o.frequency.exponentialRampToValueAtTime(680, t + 0.18);
+    g.gain.setValueAtTime(0.28, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    o.start(t); o.stop(t + 0.22);
+    // sparkle harmonic
+    const o2 = c.createOscillator(); const g2 = c.createGain();
+    o2.connect(g2); g2.connect(c.destination);
+    o2.type = "triangle";
+    o2.frequency.setValueAtTime(520, t);
+    o2.frequency.exponentialRampToValueAtTime(2200, t + 0.08);
+    g2.gain.setValueAtTime(0.1, t);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    o2.start(t); o2.stop(t + 0.12);
+  } catch (_) {}
+}
+
+function sfxStomp(combo: number) {
+  try {
+    const c = ac(); const t = c.currentTime;
+    // Punchy low thwack
+    const o = c.createOscillator(); const g = c.createGain();
+    o.connect(g); g.connect(c.destination);
+    o.type = "square";
+    o.frequency.setValueAtTime(220, t);
+    o.frequency.exponentialRampToValueAtTime(55, t + 0.18);
+    g.gain.setValueAtTime(0.35, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.start(t); o.stop(t + 0.2);
+    // Noise crack
+    const buf = c.createBuffer(1, c.sampleRate * 0.08, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = c.createBufferSource(); src.buffer = buf;
+    const flt = c.createBiquadFilter(); flt.type = "bandpass"; flt.frequency.value = 800; flt.Q.value = 0.8;
+    const ng = c.createGain(); ng.gain.setValueAtTime(0.25, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    src.connect(flt); flt.connect(ng); ng.connect(c.destination);
+    src.start(t); src.stop(t + 0.08);
+    // Ascending combo tone if combo >= 2
+    if (combo >= 2) {
+      const notes = [523.25, 659.26, 783.99, 1046.5];
+      const count = Math.min(combo, 4);
+      for (let i = 0; i < count; i++) {
+        const nt = t + 0.05 + i * 0.055;
+        const co = c.createOscillator(); const cg = c.createGain();
+        co.connect(cg); cg.connect(c.destination);
+        co.type = "triangle";
+        co.frequency.setValueAtTime(notes[i], nt);
+        co.frequency.exponentialRampToValueAtTime(notes[i] * 1.06, nt + 0.06);
+        cg.gain.setValueAtTime(0.18, nt);
+        cg.gain.exponentialRampToValueAtTime(0.001, nt + 0.1);
+        co.start(nt); co.stop(nt + 0.1);
+      }
+    }
+  } catch (_) {}
+}
+
+function sfxPowerup() {
+  try {
+    const c = ac(); const t = c.currentTime;
+    const notes = [523.25, 659.26, 783.99, 1046.5, 1318.51];
+    notes.forEach((freq, i) => {
+      const o = c.createOscillator(); const g = c.createGain();
+      o.connect(g); g.connect(c.destination);
+      o.type = "triangle";
+      o.frequency.setValueAtTime(freq, t + i * 0.065);
+      g.gain.setValueAtTime(0, t + i * 0.065);
+      g.gain.linearRampToValueAtTime(0.22, t + i * 0.065 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.065 + 0.12);
+      o.start(t + i * 0.065); o.stop(t + i * 0.065 + 0.12);
+    });
+  } catch (_) {}
+}
+
+function sfxDie() {
+  try {
+    const c = ac(); const t = c.currentTime;
+    const o = c.createOscillator(); const g = c.createGain();
+    o.connect(g); g.connect(c.destination);
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(380, t);
+    o.frequency.exponentialRampToValueAtTime(90, t + 0.55);
+    g.gain.setValueAtTime(0.3, t);
+    g.gain.setValueAtTime(0.3, t + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    o.start(t); o.stop(t + 0.6);
+    // Low thump on death
+    const o2 = c.createOscillator(); const g2 = c.createGain();
+    o2.connect(g2); g2.connect(c.destination);
+    o2.type = "sine";
+    o2.frequency.setValueAtTime(110, t);
+    o2.frequency.exponentialRampToValueAtTime(40, t + 0.3);
+    g2.gain.setValueAtTime(0.25, t);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o2.start(t); o2.stop(t + 0.35);
+  } catch (_) {}
+}
+
+function sfxStart() {
+  try {
+    const c = ac(); const t = c.currentTime;
+    const melody = [261.63, 329.63, 392, 523.25];
+    melody.forEach((freq, i) => {
+      const o = c.createOscillator(); const g = c.createGain();
+      o.connect(g); g.connect(c.destination);
+      o.type = "triangle";
+      o.frequency.value = freq;
+      const st = t + i * 0.08;
+      g.gain.setValueAtTime(0, st);
+      g.gain.linearRampToValueAtTime(0.18, st + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, st + 0.14);
+      o.start(st); o.stop(st + 0.14);
+    });
+  } catch (_) {}
+}
+
 // Per-zone platform normal colors [top, mid, bot, stroke, shine]
 const ZONE_PLAT_COLORS = [
   ["#90e870", "#38c020", "#208010", "#186010", "rgba(255,255,255,0.4)"],  // notebook
@@ -137,6 +283,7 @@ export default function Game() {
 
   const startGame = useCallback(() => {
     const gs = init(hiRef.current); gs.phase = "playing"; gsRef.current = gs;
+    sfxStart();
   }, []);
 
   useEffect(() => {
@@ -647,10 +794,12 @@ export default function Game() {
             if (gs.combo > 0) { gs.combo = 0; gs.comboTimer = 0; }
             if (p.type === "spring") {
               gs.pvy = SPRING_JUMP; p.bounceTimer = 12;
+              sfxSpring();
               addParticles(gs, p.x + p.w / 2, p.y, "#ff6090", 8);
               addFloat(gs, p.x + p.w / 2, p.y - 20, "BOING!", "#e8305a");
             } else {
               gs.pvy = BASE_JUMP; p.bounceTimer = 8;
+              sfxJump();
               if (p.type !== "disappear") addParticles(gs, p.x + p.w / 2, p.y, ZONE_PLAT_COLORS[gs.zone][1], 4);
             }
             gs.py = p.y - PLAYER_H; break;
@@ -681,6 +830,7 @@ export default function Game() {
         const dx = gs.px + PLAYER_W / 2 - (pu.x + 15); const dy = (gs.py + PLAYER_H / 2) - (pu.y + 15);
         if (Math.abs(dx) < 28 && Math.abs(dy) < 28) {
           pu.collected = true;
+          sfxPowerup();
           if (pu.type === "jetpack") { gs.jetpack = 180; addFloat(gs, gs.px + PLAYER_W / 2, gs.py, "JETPACK!", "#e04020"); }
           else { gs.hat = 300; addFloat(gs, gs.px + PLAYER_W / 2, gs.py, "PROPELLER!", "#4040dd"); }
           addParticles(gs, pu.x + 15, pu.y + 15, "#ffcc00", 12);
@@ -712,6 +862,7 @@ export default function Game() {
               m.alive = false;
               // Combo calculation
               gs.combo++;
+              sfxStomp(gs.combo);
               gs.comboTimer = 180; // 3 seconds window for next stomp
               const baseBonus = m.type === "ufo" ? 200 : m.type === "bat" ? 150 : 100;
               const comboMult = gs.combo;
@@ -747,6 +898,7 @@ export default function Game() {
     function die(gs: GS) {
       if (gs.phase !== "playing") return;
       gs.phase = "dead";
+      sfxDie();
       if (gs.score > hiRef.current) { hiRef.current = gs.score; gs.hi = gs.score; localStorage.setItem("djhi", String(gs.score)); }
     }
 
