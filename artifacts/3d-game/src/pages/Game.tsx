@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 
 const W = 400;
 const H = 600;
@@ -23,6 +23,7 @@ function getZone(score: number) {
 
 // ── SOUND ENGINE (Web Audio synthesis, no files needed) ──────────
 let _ac: AudioContext | null = null;
+let _muted = false;
 function ac(): AudioContext {
   if (!_ac) _ac = new AudioContext();
   if (_ac.state === "suspended") _ac.resume();
@@ -30,6 +31,7 @@ function ac(): AudioContext {
 }
 
 function sfxJump() {
+  if (_muted) return;
   try {
     const c = ac(); const t = c.currentTime;
     const o = c.createOscillator(); const g = c.createGain();
@@ -45,6 +47,7 @@ function sfxJump() {
 }
 
 function sfxSpring() {
+  if (_muted) return;
   try {
     const c = ac(); const t = c.currentTime;
     const o = c.createOscillator(); const g = c.createGain();
@@ -69,6 +72,7 @@ function sfxSpring() {
 }
 
 function sfxStomp(combo: number) {
+  if (_muted) return;
   try {
     const c = ac(); const t = c.currentTime;
     // Punchy low thwack
@@ -109,6 +113,7 @@ function sfxStomp(combo: number) {
 }
 
 function sfxPowerup() {
+  if (_muted) return;
   try {
     const c = ac(); const t = c.currentTime;
     const notes = [523.25, 659.26, 783.99, 1046.5, 1318.51];
@@ -126,6 +131,7 @@ function sfxPowerup() {
 }
 
 function sfxDie() {
+  if (_muted) return;
   try {
     const c = ac(); const t = c.currentTime;
     const o = c.createOscillator(); const g = c.createGain();
@@ -150,6 +156,7 @@ function sfxDie() {
 }
 
 function sfxStart() {
+  if (_muted) return;
   try {
     const c = ac(); const t = c.currentTime;
     const melody = [261.63, 329.63, 392, 523.25];
@@ -280,6 +287,12 @@ export default function Game() {
   const gsRef = useRef<GS>(init(0));
   const rafRef = useRef(0);
   const hiRef = useRef(parseInt(localStorage.getItem("djhi") || "0", 10));
+  const [muted, setMuted] = useState(false);
+
+  const toggleMute = useCallback(() => {
+    _muted = !_muted;
+    setMuted(_muted);
+  }, []);
 
   const startGame = useCallback(() => {
     const gs = init(hiRef.current); gs.phase = "playing"; gsRef.current = gs;
@@ -936,6 +949,27 @@ export default function Game() {
 
   return (
     <div style={{ width: "100vw", height: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#1a1a2e", overflow: "hidden" }}>
+      {/* Mute button — fixed top-right, outside the game canvas */}
+      <button
+        onClick={toggleMute}
+        title={muted ? "Unmute" : "Mute"}
+        style={{
+          position: "fixed", top: 14, right: 14, zIndex: 100,
+          width: 40, height: 40, borderRadius: "50%", border: "none",
+          background: "rgba(255,255,255,0.12)", backdropFilter: "blur(6px)",
+          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 20, lineHeight: 1, color: "#fff",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+          transition: "background 0.15s, transform 0.1s",
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.22)")}
+        onMouseLeave={e => (e.currentTarget.style.background = "rgba(255,255,255,0.12)")}
+        onMouseDown={e => (e.currentTarget.style.transform = "scale(0.92)")}
+        onMouseUp={e => (e.currentTarget.style.transform = "scale(1)")}
+      >
+        {muted ? "🔇" : "🔊"}
+      </button>
+
       <div style={{ position: "relative", borderRadius: "12px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,0,0,0.7), 0 0 0 3px #2a9010" }}>
         <canvas
           ref={canvasRef} width={W} height={H}
