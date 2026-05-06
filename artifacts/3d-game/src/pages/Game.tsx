@@ -450,69 +450,107 @@ export default function Game() {
       ctx.restore();
     }
 
+    function drawHeart(x:number,y:number,filled:boolean,pulse:boolean,frameN:number){
+      ctx.save();ctx.translate(x,y);
+      const sc=pulse?(.82+Math.sin(frameN*.2)*.1):.82;
+      ctx.scale(sc,sc);
+      if(filled){
+        const hg=ctx.createRadialGradient(-2,-6,1,-2,-6,13);hg.addColorStop(0,"#ff7090");hg.addColorStop(1,"#cc1035");
+        ctx.fillStyle=hg;ctx.shadowColor="rgba(220,30,60,0.4)";ctx.shadowBlur=6;
+      } else {
+        ctx.fillStyle="rgba(255,255,255,0.22)";ctx.shadowBlur=0;
+      }
+      ctx.beginPath();
+      ctx.moveTo(0,-8);ctx.bezierCurveTo(0,-16,12,-16,12,-7);ctx.bezierCurveTo(12,1,0,11,0,11);
+      ctx.bezierCurveTo(0,11,-12,1,-12,-7);ctx.bezierCurveTo(-12,-16,0,-16,0,-8);ctx.fill();
+      if(filled){
+        ctx.shadowBlur=0;ctx.fillStyle="rgba(255,255,255,0.3)";
+        ctx.beginPath();ctx.ellipse(-3,-10,3.5,2.5,-.3,0,Math.PI*2);ctx.fill();
+      } else {
+        ctx.strokeStyle="rgba(255,255,255,0.4)";ctx.lineWidth=1.5;
+        ctx.beginPath();
+        ctx.moveTo(0,-8);ctx.bezierCurveTo(0,-16,12,-16,12,-7);ctx.bezierCurveTo(12,1,0,11,0,11);
+        ctx.bezierCurveTo(0,11,-12,1,-12,-7);ctx.bezierCurveTo(-12,-16,0,-16,0,-8);ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // ── HUD ──────────────────────────────────────────────────────
     function drawHUD(gs:GS){
       ctx.save();
-      // ── Score panel (top-left) ──
-      ctx.fillStyle="rgba(255,255,255,0.82)";ctx.beginPath();ctx.roundRect(8,8,120,38,10);ctx.fill();
-      ctx.fillStyle="#2a7010";ctx.font="bold 13px 'Comic Sans MS', cursive";ctx.textAlign="left";
-      ctx.fillText(`Score: ${gs.score}`,16,24);
-      ctx.fillStyle="#a05010";ctx.fillText(`Best: ${gs.hi}`,16,40);
+      const BAR_H=52;
 
-      // ── Hearts (top-right corner) ──
-      const hPanelW=90,hPanelH=34,hPanelX=W-8-hPanelW,hPanelY=8;
-      ctx.fillStyle="rgba(255,255,255,0.82)";ctx.beginPath();ctx.roundRect(hPanelX,hPanelY,hPanelW,hPanelH,10);ctx.fill();
+      // ── Full-width frosted glass top bar ──
+      const barGrad=ctx.createLinearGradient(0,0,0,BAR_H);
+      barGrad.addColorStop(0,"rgba(0,0,0,0.52)");barGrad.addColorStop(1,"rgba(0,0,0,0.28)");
+      ctx.fillStyle=barGrad;ctx.fillRect(0,0,W,BAR_H);
+      // subtle bottom border line
+      ctx.strokeStyle="rgba(255,255,255,0.12)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,BAR_H);ctx.lineTo(W,BAR_H);ctx.stroke();
+
+      // ── Score (left side) ──
+      ctx.textAlign="left";
+      ctx.fillStyle="rgba(255,255,255,0.55)";ctx.font="10px 'Comic Sans MS', cursive";
+      ctx.fillText("SCORE",14,16);
+      ctx.fillStyle="#ffffff";ctx.font="bold 22px 'Comic Sans MS', cursive";
+      ctx.fillText(String(gs.score),14,40);
+      // Best — right of score, small
+      ctx.fillStyle="rgba(255,220,120,0.85)";ctx.font="bold 10px 'Comic Sans MS', cursive";
+      const sw=ctx.measureText(String(gs.score)).width;
+      ctx.fillText(`  BEST ${gs.hi}`,14+sw,40);
+
+      // ── Divider ──
+      ctx.strokeStyle="rgba(255,255,255,0.12)";ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(W/2,8);ctx.lineTo(W/2,BAR_H-8);ctx.stroke();
+
+      // ── Hearts (right side) ──
+      ctx.textAlign="right";
+      ctx.fillStyle="rgba(255,255,255,0.55)";ctx.font="10px 'Comic Sans MS', cursive";
+      ctx.fillText("LIVES",W-12,16);
+      const heartSpacing=28,heartsStartX=W-12-((MAX_LIVES-1)*heartSpacing);
       for(let i=0;i<MAX_LIVES;i++){
-        // center the 3 hearts inside the panel
-        const hx=hPanelX+16+i*26,hy=hPanelY+17;
-        ctx.save();ctx.translate(hx,hy);
-        if(i<gs.lives){
-          // Filled red heart with pulse on last life
-          const scale=gs.lives===1?(.78+Math.sin(gs.frameN*.18)*.08):.78;
-          ctx.scale(scale,scale);
-          const hg=ctx.createRadialGradient(0,-4,1,0,-4,14);hg.addColorStop(0,"#ff6080");hg.addColorStop(1,"#cc1035");
-          ctx.fillStyle=hg;ctx.beginPath();
-          ctx.moveTo(0,-10);ctx.bezierCurveTo(0,-18,13,-18,13,-8);ctx.bezierCurveTo(13,2,0,12,0,12);
-          ctx.bezierCurveTo(0,12,-13,2,-13,-8);ctx.bezierCurveTo(-13,-18,0,-18,0,-10);ctx.fill();
-          // shine
-          ctx.fillStyle="rgba(255,255,255,0.35)";ctx.beginPath();ctx.ellipse(-3,-10,4,3,-.3,0,Math.PI*2);ctx.fill();
-        } else {
-          // Empty heart outline
-          ctx.scale(.78,.78);ctx.strokeStyle="rgba(180,180,180,0.7)";ctx.lineWidth=1.8;ctx.beginPath();
-          ctx.moveTo(0,-10);ctx.bezierCurveTo(0,-18,13,-18,13,-8);ctx.bezierCurveTo(13,2,0,12,0,12);
-          ctx.bezierCurveTo(0,12,-13,2,-13,-8);ctx.bezierCurveTo(-13,-18,0,-18,0,-10);ctx.stroke();
-        }
+        drawHeart(heartsStartX+i*heartSpacing,38,i<gs.lives,gs.lives===1&&i<gs.lives,gs.frameN);
+      }
+
+      // ── Checkpoint badge (below bar, left) ──
+      if(gs.checkpoint&&!gs.checkpointUsed){
+        ctx.save();
+        ctx.fillStyle="rgba(30,160,70,0.88)";ctx.beginPath();ctx.roundRect(8,BAR_H+5,130,18,9);ctx.fill();
+        ctx.fillStyle="#fff";ctx.font="bold 10px 'Comic Sans MS', cursive";ctx.textAlign="left";
+        ctx.fillText(`✓ Checkpoint ${gs.checkpoint.score} pts`,14,BAR_H+18);
         ctx.restore();
       }
 
-      // ── Checkpoint indicator (below score) ──
-      if(gs.checkpoint&&!gs.checkpointUsed){
-        ctx.fillStyle="rgba(220,255,220,0.88)";ctx.beginPath();ctx.roundRect(8,50,120,18,8);ctx.fill();
-        ctx.fillStyle="#208040";ctx.font="bold 10px 'Comic Sans MS', cursive";ctx.textAlign="left";
-        ctx.fillText(`✓ Checkpoint ${gs.checkpoint.score}`,14,63);
-      }
+      // ── Power-up timers (below bar, right) ──
+      let timerRow=BAR_H+5;
+      const showTimer=(emoji:string,frames:number,bg:string)=>{
+        const tw=80;
+        ctx.save();
+        ctx.fillStyle=bg;ctx.beginPath();ctx.roundRect(W-tw-6,timerRow,tw,18,9);ctx.fill();
+        ctx.fillStyle="#fff";ctx.font="bold 10px sans-serif";ctx.textAlign="right";
+        const barW=(tw-10)*(frames/300);
+        ctx.fillStyle="rgba(255,255,255,0.2)";ctx.fillRect(W-tw-6+5,timerRow+13,tw-10,3);
+        ctx.fillStyle="rgba(255,255,255,0.7)";ctx.fillRect(W-tw-6+5,timerRow+13,Math.min(barW,tw-10),3);
+        ctx.fillStyle="#fff";ctx.textAlign="center";ctx.font="bold 10px sans-serif";
+        ctx.fillText(`${emoji} ${Math.ceil(frames/60)}s`,W-tw/2-6,timerRow+13);
+        ctx.restore();
+        timerRow+=22;
+      };
+      if(gs.jetpack>0)showTimer("🚀",gs.jetpack,"rgba(180,50,10,0.82)");
+      if(gs.hat>0)showTimer("🎩",gs.hat,"rgba(30,30,180,0.82)");
+      if(gs.dash>0)showTimer("⚡",gs.dash,"rgba(160,120,0,0.82)");
 
-      // ── Combo indicator ──
+      // ── Combo indicator (below bar, center) ──
       if(gs.combo>=2){
         const pulse=1+Math.sin(gs.frameN*.25)*.08;
         const comboColors=["","","#ff9020","#ff5010","#dd2090","#aa00ff"];
         const col=comboColors[Math.min(gs.combo,comboColors.length-1)]||"#aa00ff";
-        ctx.save();ctx.translate(W/2,50);ctx.scale(pulse,pulse);
-        ctx.fillStyle="rgba(0,0,0,0.35)";ctx.beginPath();ctx.roundRect(-52,-16,104,28,12);ctx.fill();
-        ctx.fillStyle=col;ctx.font="bold 18px 'Comic Sans MS', cursive";ctx.textAlign="center";
-        ctx.fillText(`🔥 x${gs.combo} COMBO!`,0,6);ctx.restore();
+        ctx.save();ctx.translate(W/2,BAR_H+24);ctx.scale(pulse,pulse);
+        const cg=ctx.createLinearGradient(-55,0,55,0);cg.addColorStop(0,"rgba(0,0,0,0)");cg.addColorStop(.2,"rgba(0,0,0,0.5)");cg.addColorStop(.8,"rgba(0,0,0,0.5)");cg.addColorStop(1,"rgba(0,0,0,0)");
+        ctx.fillStyle=cg;ctx.fillRect(-55,-16,110,26);
+        ctx.fillStyle=col;ctx.font="bold 17px 'Comic Sans MS', cursive";ctx.textAlign="center";
+        ctx.fillText(`🔥 x${gs.combo} COMBO!`,0,5);ctx.restore();
       }
 
-      // ── Power-up timers (below hearts, top-right) ──
-      let timerRow=hPanelY+hPanelH+6;
-      const showTimer=(label:string,frames:number,col:string)=>{
-        ctx.fillStyle="rgba(255,255,255,0.82)";ctx.beginPath();ctx.roundRect(W-98,timerRow,90,22,8);ctx.fill();
-        ctx.fillStyle=col;ctx.font="bold 11px sans-serif";ctx.textAlign="right";
-        ctx.fillText(`${label} ${Math.ceil(frames/60)}s`,W-10,timerRow+15);timerRow+=28;
-      };
-      if(gs.jetpack>0)showTimer("🚀",gs.jetpack,"#cc3010");
-      if(gs.hat>0)showTimer("🎩",gs.hat,"#2222cc");
-      if(gs.dash>0)showTimer("⚡",gs.dash,"#cc9900");
       ctx.restore();
     }
 
