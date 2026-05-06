@@ -450,104 +450,114 @@ export default function Game() {
       ctx.restore();
     }
 
-    function drawHeart(x:number,y:number,filled:boolean,pulse:boolean,frameN:number){
-      ctx.save();ctx.translate(x,y);
-      const sc=pulse?(.82+Math.sin(frameN*.2)*.1):.82;
-      ctx.scale(sc,sc);
-      if(filled){
-        const hg=ctx.createRadialGradient(-2,-6,1,-2,-6,13);hg.addColorStop(0,"#ff7090");hg.addColorStop(1,"#cc1035");
-        ctx.fillStyle=hg;ctx.shadowColor="rgba(220,30,60,0.4)";ctx.shadowBlur=6;
-      } else {
-        ctx.fillStyle="rgba(255,255,255,0.22)";ctx.shadowBlur=0;
-      }
+    // ── HUD helpers ──────────────────────────────────────────────
+    function pill(x:number,y:number,w:number,h:number,r:number,fill:string,stroke?:string){
+      ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=fill;ctx.fill();
+      if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1.5;ctx.stroke();}
+    }
+    function heartShape(cx:number,cy:number,size:number){
       ctx.beginPath();
-      ctx.moveTo(0,-8);ctx.bezierCurveTo(0,-16,12,-16,12,-7);ctx.bezierCurveTo(12,1,0,11,0,11);
-      ctx.bezierCurveTo(0,11,-12,1,-12,-7);ctx.bezierCurveTo(-12,-16,0,-16,0,-8);ctx.fill();
-      if(filled){
-        ctx.shadowBlur=0;ctx.fillStyle="rgba(255,255,255,0.3)";
-        ctx.beginPath();ctx.ellipse(-3,-10,3.5,2.5,-.3,0,Math.PI*2);ctx.fill();
-      } else {
-        ctx.strokeStyle="rgba(255,255,255,0.4)";ctx.lineWidth=1.5;
-        ctx.beginPath();
-        ctx.moveTo(0,-8);ctx.bezierCurveTo(0,-16,12,-16,12,-7);ctx.bezierCurveTo(12,1,0,11,0,11);
-        ctx.bezierCurveTo(0,11,-12,1,-12,-7);ctx.bezierCurveTo(-12,-16,0,-16,0,-8);ctx.stroke();
-      }
-      ctx.restore();
+      ctx.moveTo(cx,cy-size*.2);
+      ctx.bezierCurveTo(cx,cy-size,cx+size,cy-size,cx+size,cy-size*.3);
+      ctx.bezierCurveTo(cx+size,cy+size*.3,cx,cy+size*.9,cx,cy+size*.9);
+      ctx.bezierCurveTo(cx,cy+size*.9,cx-size,cy+size*.3,cx-size,cy-size*.3);
+      ctx.bezierCurveTo(cx-size,cy-size,cx,cy-size,cx,cy-size*.2);
+      ctx.closePath();
     }
 
     // ── HUD ──────────────────────────────────────────────────────
     function drawHUD(gs:GS){
       ctx.save();
-      const BAR_H=52;
 
-      // ── Full-width frosted glass top bar ──
-      const barGrad=ctx.createLinearGradient(0,0,0,BAR_H);
-      barGrad.addColorStop(0,"rgba(0,0,0,0.52)");barGrad.addColorStop(1,"rgba(0,0,0,0.28)");
-      ctx.fillStyle=barGrad;ctx.fillRect(0,0,W,BAR_H);
-      // subtle bottom border line
-      ctx.strokeStyle="rgba(255,255,255,0.12)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,BAR_H);ctx.lineTo(W,BAR_H);ctx.stroke();
+      // ── SCORE PILL (top-left) ──────────────
+      const SP_W=118,SP_H=54,SP_X=10,SP_Y=10;
+      // shadow
+      ctx.shadowColor="rgba(0,0,0,0.22)";ctx.shadowBlur=8;ctx.shadowOffsetY=2;
+      pill(SP_X,SP_Y,SP_W,SP_H,14,"#ffffff","rgba(60,180,60,0.5)");
+      ctx.shadowBlur=0;ctx.shadowOffsetY=0;
+      // green top accent bar (top corners match pill radius, bottom flat)
+      ctx.save();ctx.beginPath();ctx.roundRect(SP_X,SP_Y,SP_W,6,[14,14,0,0]);ctx.fillStyle="#3dc825";ctx.fill();ctx.restore();
+      // "SCORE" label
+      ctx.font="bold 9px Arial, sans-serif";ctx.fillStyle="#888";ctx.textAlign="left";ctx.letterSpacing="1px";
+      ctx.fillText("SCORE",SP_X+10,SP_Y+20);ctx.letterSpacing="0px";
+      // score number — big
+      ctx.font="bold 26px Arial Black, Arial, sans-serif";ctx.fillStyle="#1a7010";
+      ctx.fillText(String(gs.score),SP_X+10,SP_Y+46);
+      // best — right-aligned inside pill, small amber
+      ctx.font="bold 9px Arial, sans-serif";ctx.fillStyle="#b06010";ctx.textAlign="right";ctx.letterSpacing=".5px";
+      ctx.fillText(`BEST  ${gs.hi}`,SP_X+SP_W-8,SP_Y+20);ctx.letterSpacing="0px";
 
-      // ── Score (left side) ──
-      ctx.textAlign="left";
-      ctx.fillStyle="rgba(255,255,255,0.55)";ctx.font="10px 'Comic Sans MS', cursive";
-      ctx.fillText("SCORE",14,16);
-      ctx.fillStyle="#ffffff";ctx.font="bold 22px 'Comic Sans MS', cursive";
-      ctx.fillText(String(gs.score),14,40);
-      // Best — right of score, small
-      ctx.fillStyle="rgba(255,220,120,0.85)";ctx.font="bold 10px 'Comic Sans MS', cursive";
-      const sw=ctx.measureText(String(gs.score)).width;
-      ctx.fillText(`  BEST ${gs.hi}`,14+sw,40);
-
-      // ── Divider ──
-      ctx.strokeStyle="rgba(255,255,255,0.12)";ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(W/2,8);ctx.lineTo(W/2,BAR_H-8);ctx.stroke();
-
-      // ── Hearts (right side) ──
-      ctx.textAlign="right";
-      ctx.fillStyle="rgba(255,255,255,0.55)";ctx.font="10px 'Comic Sans MS', cursive";
-      ctx.fillText("LIVES",W-12,16);
-      const heartSpacing=28,heartsStartX=W-12-((MAX_LIVES-1)*heartSpacing);
+      // ── LIVES PILL (top-right) ─────────────
+      const LP_W=100,LP_H=54,LP_X=W-LP_W-10,LP_Y=10;
+      ctx.shadowColor="rgba(0,0,0,0.22)";ctx.shadowBlur=8;ctx.shadowOffsetY=2;
+      pill(LP_X,LP_Y,LP_W,LP_H,14,"#ffffff","rgba(220,50,70,0.35)");
+      ctx.shadowBlur=0;ctx.shadowOffsetY=0;
+      // red top accent bar
+      ctx.save();ctx.beginPath();ctx.roundRect(LP_X,LP_Y,LP_W,6,[14,14,0,0]);ctx.fillStyle="#e83050";ctx.fill();ctx.restore();
+      // "LIVES" label
+      ctx.font="bold 9px Arial, sans-serif";ctx.fillStyle="#888";ctx.textAlign="right";ctx.letterSpacing="1px";
+      ctx.fillText("LIVES",LP_X+LP_W-8,LP_Y+20);ctx.letterSpacing="0px";
+      // hearts row — centered in pill
+      const HS=13,HGap=28,HY=LP_Y+40,HStartX=LP_X+LP_W/2-(MAX_LIVES-1)*HGap/2;
       for(let i=0;i<MAX_LIVES;i++){
-        drawHeart(heartsStartX+i*heartSpacing,38,i<gs.lives,gs.lives===1&&i<gs.lives,gs.frameN);
+        const hcx=HStartX+i*HGap,pulsing=gs.lives===1&&i<gs.lives;
+        const sc=pulsing?(.95+Math.sin(gs.frameN*.22)*.12):1;
+        ctx.save();ctx.translate(hcx,HY);ctx.scale(sc,sc);ctx.translate(-hcx,-HY);
+        if(i<gs.lives){
+          const hg=ctx.createRadialGradient(hcx-2,HY-5,1,hcx-2,HY-5,HS*1.4);
+          hg.addColorStop(0,"#ff8090");hg.addColorStop(1,"#d41535");
+          ctx.fillStyle=hg;
+          ctx.shadowColor=pulsing?"rgba(220,20,50,0.5)":"rgba(200,20,50,0.25)";ctx.shadowBlur=pulsing?8:4;
+          heartShape(hcx,HY,HS);ctx.fill();ctx.shadowBlur=0;
+          // shine
+          ctx.fillStyle="rgba(255,255,255,0.38)";
+          ctx.beginPath();ctx.ellipse(hcx-3,HY-HS*.5,HS*.35,HS*.22,-.3,0,Math.PI*2);ctx.fill();
+        } else {
+          heartShape(hcx,HY,HS);
+          ctx.strokeStyle="#ddd";ctx.lineWidth=1.5;ctx.stroke();
+          ctx.fillStyle="rgba(230,230,230,0.5)";ctx.fill();
+        }
+        ctx.restore();
       }
 
-      // ── Checkpoint badge (below bar, left) ──
+      // ── CHECKPOINT BADGE (below score pill) ──
       if(gs.checkpoint&&!gs.checkpointUsed){
-        ctx.save();
-        ctx.fillStyle="rgba(30,160,70,0.88)";ctx.beginPath();ctx.roundRect(8,BAR_H+5,130,18,9);ctx.fill();
-        ctx.fillStyle="#fff";ctx.font="bold 10px 'Comic Sans MS', cursive";ctx.textAlign="left";
-        ctx.fillText(`✓ Checkpoint ${gs.checkpoint.score} pts`,14,BAR_H+18);
-        ctx.restore();
+        pill(SP_X,SP_Y+SP_H+5,SP_W,18,9,"rgba(34,160,60,0.92)");
+        ctx.fillStyle="#fff";ctx.font="bold 10px Arial, sans-serif";ctx.textAlign="left";
+        ctx.fillText(`✓ CP  ${gs.checkpoint.score} pts`,SP_X+8,SP_Y+SP_H+18);
       }
 
-      // ── Power-up timers (below bar, right) ──
-      let timerRow=BAR_H+5;
-      const showTimer=(emoji:string,frames:number,bg:string)=>{
-        const tw=80;
-        ctx.save();
-        ctx.fillStyle=bg;ctx.beginPath();ctx.roundRect(W-tw-6,timerRow,tw,18,9);ctx.fill();
-        ctx.fillStyle="#fff";ctx.font="bold 10px sans-serif";ctx.textAlign="right";
-        const barW=(tw-10)*(frames/300);
-        ctx.fillStyle="rgba(255,255,255,0.2)";ctx.fillRect(W-tw-6+5,timerRow+13,tw-10,3);
-        ctx.fillStyle="rgba(255,255,255,0.7)";ctx.fillRect(W-tw-6+5,timerRow+13,Math.min(barW,tw-10),3);
-        ctx.fillStyle="#fff";ctx.textAlign="center";ctx.font="bold 10px sans-serif";
-        ctx.fillText(`${emoji} ${Math.ceil(frames/60)}s`,W-tw/2-6,timerRow+13);
-        ctx.restore();
-        timerRow+=22;
+      // ── POWER-UP TIMERS (below lives pill, right) ──
+      let tr=LP_Y+LP_H+6;
+      const showTimer=(emoji:string,frames:number,accent:string)=>{
+        const TW=LP_W,TH=22;
+        ctx.shadowColor="rgba(0,0,0,0.15)";ctx.shadowBlur=4;
+        pill(LP_X,tr,TW,TH,11,"rgba(30,30,30,0.82)");
+        ctx.shadowBlur=0;
+        // progress bar track
+        ctx.fillStyle="rgba(255,255,255,0.12)";ctx.beginPath();ctx.roundRect(LP_X+6,tr+TH-6,TW-12,4,2);ctx.fill();
+        // progress fill
+        const maxF=pu_type_max(emoji);
+        ctx.fillStyle=accent;ctx.beginPath();ctx.roundRect(LP_X+6,tr+TH-6,Math.max(4,(TW-12)*(frames/maxF)),4,2);ctx.fill();
+        ctx.fillStyle="#fff";ctx.font="bold 11px Arial, sans-serif";ctx.textAlign="left";
+        ctx.fillText(`${emoji}  ${Math.ceil(frames/60)}s`,LP_X+8,tr+14);
+        tr+=TH+5;
       };
-      if(gs.jetpack>0)showTimer("🚀",gs.jetpack,"rgba(180,50,10,0.82)");
-      if(gs.hat>0)showTimer("🎩",gs.hat,"rgba(30,30,180,0.82)");
-      if(gs.dash>0)showTimer("⚡",gs.dash,"rgba(160,120,0,0.82)");
+      function pu_type_max(e:string){return e==="🚀"?180:e==="🎩"?300:90;}
+      if(gs.jetpack>0)showTimer("🚀",gs.jetpack,"#ff6030");
+      if(gs.hat>0)showTimer("🎩",gs.hat,"#6060ee");
+      if(gs.dash>0)showTimer("⚡",gs.dash,"#ffcc00");
 
-      // ── Combo indicator (below bar, center) ──
+      // ── COMBO (centered, below pills) ──
       if(gs.combo>=2){
-        const pulse=1+Math.sin(gs.frameN*.25)*.08;
+        const pulse=1+Math.sin(gs.frameN*.28)*.09;
         const comboColors=["","","#ff9020","#ff5010","#dd2090","#aa00ff"];
         const col=comboColors[Math.min(gs.combo,comboColors.length-1)]||"#aa00ff";
-        ctx.save();ctx.translate(W/2,BAR_H+24);ctx.scale(pulse,pulse);
-        const cg=ctx.createLinearGradient(-55,0,55,0);cg.addColorStop(0,"rgba(0,0,0,0)");cg.addColorStop(.2,"rgba(0,0,0,0.5)");cg.addColorStop(.8,"rgba(0,0,0,0.5)");cg.addColorStop(1,"rgba(0,0,0,0)");
-        ctx.fillStyle=cg;ctx.fillRect(-55,-16,110,26);
-        ctx.fillStyle=col;ctx.font="bold 17px 'Comic Sans MS', cursive";ctx.textAlign="center";
+        ctx.save();ctx.translate(W/2,SP_Y+SP_H+22);ctx.scale(pulse,pulse);
+        ctx.shadowColor="rgba(0,0,0,0.35)";ctx.shadowBlur=6;
+        ctx.fillStyle="rgba(0,0,0,0.55)";ctx.beginPath();ctx.roundRect(-58,-16,116,28,14);ctx.fill();
+        ctx.shadowBlur=0;
+        ctx.fillStyle=col;ctx.font="bold 16px 'Comic Sans MS', cursive";ctx.textAlign="center";
         ctx.fillText(`🔥 x${gs.combo} COMBO!`,0,5);ctx.restore();
       }
 
