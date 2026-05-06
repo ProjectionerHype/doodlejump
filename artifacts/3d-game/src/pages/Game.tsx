@@ -749,10 +749,19 @@ export default function Game() {
       gs.floats.forEach((f)=>{f.y+=f.vy;f.life-=.018;});
       gs.floats=gs.floats.filter((f)=>f.life>0);
 
-      // Fall off screen
+      // Fall off screen — spend a life first, checkpoint is the final safety net
       if(toScreen(gs.py)>H+60){
-        if(gs.checkpoint&&!gs.checkpointUsed){respawn(gs);}
-        else die(gs);
+        if(gs.lives>1){
+          gs.lives--;sfxHit();
+          gs.invincible=INVINCIBLE_FRAMES*2;
+          gs.py=gs.camY+H*.52-PLAYER_H;gs.px=W/2-PLAYER_W/2;gs.pvx=0;gs.pvy=BASE_JUMP;
+          gs.platforms=freshPlatforms(gs.camY,gs.score);gs.monsters=[];gs.combo=0;gs.comboTimer=0;
+          addFloat(gs,W/2,gs.py-30,`❤️ ${gs.lives} ${gs.lives===1?"life":"lives"} left!`,"#ee2040",true);
+        } else if(gs.checkpoint&&!gs.checkpointUsed){
+          respawn(gs);
+        } else {
+          die(gs);
+        }
       }
     }
 
