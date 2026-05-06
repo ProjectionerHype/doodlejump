@@ -453,35 +453,46 @@ export default function Game() {
     // ── HUD ──────────────────────────────────────────────────────
     function drawHUD(gs:GS){
       ctx.save();
-      // Score panel (taller to fit hearts)
-      ctx.fillStyle="rgba(255,255,255,0.82)";ctx.beginPath();ctx.roundRect(8,8,128,56,10);ctx.fill();
+      // ── Score panel (top-left) ──
+      ctx.fillStyle="rgba(255,255,255,0.82)";ctx.beginPath();ctx.roundRect(8,8,120,38,10);ctx.fill();
       ctx.fillStyle="#2a7010";ctx.font="bold 13px 'Comic Sans MS', cursive";ctx.textAlign="left";
       ctx.fillText(`Score: ${gs.score}`,16,24);
       ctx.fillStyle="#a05010";ctx.fillText(`Best: ${gs.hi}`,16,40);
-      // Hearts
+
+      // ── Hearts (top-right corner) ──
+      const hPanelW=90,hPanelH=34,hPanelX=W-8-hPanelW,hPanelY=8;
+      ctx.fillStyle="rgba(255,255,255,0.82)";ctx.beginPath();ctx.roundRect(hPanelX,hPanelY,hPanelW,hPanelH,10);ctx.fill();
       for(let i=0;i<MAX_LIVES;i++){
-        const hx=16+i*22,hy=54;
-        ctx.save();ctx.translate(hx,hy);ctx.scale(.55,.55);
+        // center the 3 hearts inside the panel
+        const hx=hPanelX+16+i*26,hy=hPanelY+17;
+        ctx.save();ctx.translate(hx,hy);
         if(i<gs.lives){
-          // Filled red heart
-          ctx.fillStyle="#ee2040";ctx.beginPath();
-          ctx.moveTo(0,-10);ctx.bezierCurveTo(0,-18,12,-18,12,-8);ctx.bezierCurveTo(12,0,0,10,0,10);
-          ctx.bezierCurveTo(0,10,-12,0,-12,-8);ctx.bezierCurveTo(-12,-18,0,-18,0,-10);ctx.fill();
+          // Filled red heart with pulse on last life
+          const scale=gs.lives===1?(.78+Math.sin(gs.frameN*.18)*.08):.78;
+          ctx.scale(scale,scale);
+          const hg=ctx.createRadialGradient(0,-4,1,0,-4,14);hg.addColorStop(0,"#ff6080");hg.addColorStop(1,"#cc1035");
+          ctx.fillStyle=hg;ctx.beginPath();
+          ctx.moveTo(0,-10);ctx.bezierCurveTo(0,-18,13,-18,13,-8);ctx.bezierCurveTo(13,2,0,12,0,12);
+          ctx.bezierCurveTo(0,12,-13,2,-13,-8);ctx.bezierCurveTo(-13,-18,0,-18,0,-10);ctx.fill();
+          // shine
+          ctx.fillStyle="rgba(255,255,255,0.35)";ctx.beginPath();ctx.ellipse(-3,-10,4,3,-.3,0,Math.PI*2);ctx.fill();
         } else {
-          // Empty heart
-          ctx.strokeStyle="#bbb";ctx.lineWidth=2;ctx.beginPath();
-          ctx.moveTo(0,-10);ctx.bezierCurveTo(0,-18,12,-18,12,-8);ctx.bezierCurveTo(12,0,0,10,0,10);
-          ctx.bezierCurveTo(0,10,-12,0,-12,-8);ctx.bezierCurveTo(-12,-18,0,-18,0,-10);ctx.stroke();
+          // Empty heart outline
+          ctx.scale(.78,.78);ctx.strokeStyle="rgba(180,180,180,0.7)";ctx.lineWidth=1.8;ctx.beginPath();
+          ctx.moveTo(0,-10);ctx.bezierCurveTo(0,-18,13,-18,13,-8);ctx.bezierCurveTo(13,2,0,12,0,12);
+          ctx.bezierCurveTo(0,12,-13,2,-13,-8);ctx.bezierCurveTo(-13,-18,0,-18,0,-10);ctx.stroke();
         }
         ctx.restore();
       }
-      // Checkpoint indicator
+
+      // ── Checkpoint indicator (below score) ──
       if(gs.checkpoint&&!gs.checkpointUsed){
-        ctx.fillStyle="rgba(255,255,255,0.8)";ctx.beginPath();ctx.roundRect(8,68,128,18,8);ctx.fill();
+        ctx.fillStyle="rgba(220,255,220,0.88)";ctx.beginPath();ctx.roundRect(8,50,120,18,8);ctx.fill();
         ctx.fillStyle="#208040";ctx.font="bold 10px 'Comic Sans MS', cursive";ctx.textAlign="left";
-        ctx.fillText(`✓ Checkpoint ${gs.checkpoint.score}`,14,81);
+        ctx.fillText(`✓ Checkpoint ${gs.checkpoint.score}`,14,63);
       }
-      // Combo indicator
+
+      // ── Combo indicator ──
       if(gs.combo>=2){
         const pulse=1+Math.sin(gs.frameN*.25)*.08;
         const comboColors=["","","#ff9020","#ff5010","#dd2090","#aa00ff"];
@@ -491,12 +502,13 @@ export default function Game() {
         ctx.fillStyle=col;ctx.font="bold 18px 'Comic Sans MS', cursive";ctx.textAlign="center";
         ctx.fillText(`🔥 x${gs.combo} COMBO!`,0,6);ctx.restore();
       }
-      // Power-up timers (top right)
-      let timerRow=8;
+
+      // ── Power-up timers (below hearts, top-right) ──
+      let timerRow=hPanelY+hPanelH+6;
       const showTimer=(label:string,frames:number,col:string)=>{
-        ctx.fillStyle="rgba(255,255,255,0.82)";ctx.beginPath();ctx.roundRect(W-112,timerRow,104,24,8);ctx.fill();
-        ctx.fillStyle=col;ctx.font="bold 12px sans-serif";ctx.textAlign="right";
-        ctx.fillText(`${label} ${Math.ceil(frames/60)}s`,W-12,timerRow+17);timerRow+=30;
+        ctx.fillStyle="rgba(255,255,255,0.82)";ctx.beginPath();ctx.roundRect(W-98,timerRow,90,22,8);ctx.fill();
+        ctx.fillStyle=col;ctx.font="bold 11px sans-serif";ctx.textAlign="right";
+        ctx.fillText(`${label} ${Math.ceil(frames/60)}s`,W-10,timerRow+15);timerRow+=28;
       };
       if(gs.jetpack>0)showTimer("🚀",gs.jetpack,"#cc3010");
       if(gs.hat>0)showTimer("🎩",gs.hat,"#2222cc");
