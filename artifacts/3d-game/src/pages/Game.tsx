@@ -871,6 +871,8 @@ export default function Game() {
     if(gs.phase==="dead"&&mx>W/2-82&&mx<W/2+82&&my>330&&my<380)startGame();
   },[startGame]);
 
+  const adSrc = `<!DOCTYPE html><html><head><script async data-cfasync="false" src="https://pl30126736.effectivecpmnetwork.com/fa2c350cca8a171485363cea2b95dd75/invoke.js"><\/script></head><body style="margin:0;padding:0;background:transparent"><div id="container-fa2c350cca8a171485363cea2b95dd75"></div></body></html>`;
+
   return(
     <div style={{width:"100vw",height:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#1a1a2e",overflow:"hidden"}}>
       <button onClick={toggleMute} title={muted?"Unmute":"Mute"}
@@ -880,10 +882,26 @@ export default function Game() {
         onMouseDown={e=>(e.currentTarget.style.transform="scale(0.92)")}
         onMouseUp={e=>(e.currentTarget.style.transform="scale(1)")}
       >{muted?"🔇":"🔊"}</button>
-      <div style={{position:"relative",borderRadius:"12px",overflow:"hidden",boxShadow:"0 8px 40px rgba(0,0,0,0.7), 0 0 0 3px #2a9010"}}>
+
+      {/* Left ad — hidden on narrow screens via CSS */}
+      <div className="side-ad">
+        <div id="container-fa2c350cca8a171485363cea2b95dd75"></div>
+      </div>
+
+      <div style={{position:"relative",borderRadius:"12px",overflow:"hidden",boxShadow:"0 8px 40px rgba(0,0,0,0.7), 0 0 0 3px #2a9010",flexShrink:0}}>
         <canvas ref={canvasRef} width={W} height={H}
           style={{display:"block",maxHeight:"100dvh",maxWidth:"100vw",width:"auto",height:"auto",cursor:"default",touchAction:"none",userSelect:"none"}}
           onClick={handleClick} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}/>
+      </div>
+
+      {/* Right ad in its own iframe so the ad script can target the same container ID */}
+      <div className="side-ad">
+        <iframe
+          title="Advertisement"
+          scrolling="no"
+          style={{border:"none",width:160,height:600,display:"block"}}
+          srcDoc={adSrc}
+        />
       </div>
     </div>
   );
