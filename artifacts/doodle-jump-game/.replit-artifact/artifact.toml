@@ -1,5 +1,5 @@
 kind = "web"
-previewPath = "/"
+previewPath = "/doodle-jump/"
 title = "Doodle Jump"
 version = "1.0.0"
 id = "artifacts/doodle-jump-game"
@@ -11,7 +11,7 @@ version = "1.0.0"
 
 [[services]]
 name = "web"
-paths = [ "/" ]
+paths = [ "/doodle-jump/" ]
 localPort = 22529
 
 [services.development]
@@ -28,4 +28,4 @@ to = "/index.html"
 
 [services.env]
 PORT = "22529"
-BASE_PATH = "/"
+BASE_PATH = "/doodle-jump/"
