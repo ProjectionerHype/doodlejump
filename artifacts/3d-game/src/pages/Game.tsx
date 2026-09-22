@@ -850,7 +850,6 @@ export default function Game() {
     e.preventDefault();const gs=gsRef.current,canvas=canvasRef.current!,rect=canvas.getBoundingClientRect();
     const t=e.touches[0],mx=(t.clientX-rect.left)*(W/rect.width),my=(t.clientY-rect.top)*(H/rect.height);
     if(gs.phase==="menu"){if(mx>W/2-85&&mx<W/2+85&&my>254&&my<302)startGame();return;}
-    if(gs.phase==="dead"){if(mx>W/2-82&&mx<W/2+82&&my>330&&my<380)startGame();return;}
     gs.touchTargetX=mx;
   },[startGame]);
 
