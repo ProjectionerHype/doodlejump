@@ -850,6 +850,7 @@ export default function Game() {
     e.preventDefault();const gs=gsRef.current,canvas=canvasRef.current!,rect=canvas.getBoundingClientRect();
     const t=e.touches[0],mx=(t.clientX-rect.left)*(W/rect.width),my=(t.clientY-rect.top)*(H/rect.height);
     if(gs.phase==="menu"){if(mx>W/2-85&&mx<W/2+85&&my>254&&my<302)startGame();return;}
+    if(gs.phase==="dead"){if(mx>W/2-82&&mx<W/2+82&&my>330&&my<380)startGame();return;}
     gs.touchTargetX=mx;
   },[startGame]);
 
@@ -880,18 +881,11 @@ export default function Game() {
         onMouseUp={e=>(e.currentTarget.style.transform="scale(1)")}
       >{muted?"🔇":"🔊"}</button>
 
-      {/* Left ad — hidden on narrow screens via CSS */}
-      
-
       <div style={{position:"relative",borderRadius:"12px",overflow:"hidden",boxShadow:"0 8px 40px rgba(0,0,0,0.7), 0 0 0 3px #2a9010",flexShrink:0}}>
         <canvas ref={canvasRef} width={W} height={H}
           style={{display:"block",maxHeight:"100dvh",maxWidth:"100vw",width:"auto",height:"auto",cursor:"default",touchAction:"none",userSelect:"none"}}
           onClick={handleClick} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}/>
       </div>
-   </div>
-
-
-      {/* Right ad in its own iframe so the ad script can target the same container ID */}
-      
+    </div>
   );
 }
