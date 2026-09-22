@@ -871,8 +871,6 @@ export default function Game() {
     if(gs.phase==="dead"&&mx>W/2-82&&mx<W/2+82&&my>330&&my<380)startGame();
   },[startGame]);
 
-  const adSrc = `<!DOCTYPE html><html><head><script async data-cfasync="false" src="https://pl30126736.effectivecpmnetwork.com/fa2c350cca8a171485363cea2b95dd75/invoke.js"><\/script></head><body style="margin:0;padding:0;background:transparent"><div id="container-fa2c350cca8a171485363cea2b95dd75"></div></body></html>`;
-
   return(
     <div style={{width:"100vw",height:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#1a1a2e",overflow:"hidden"}}>
       <button onClick={toggleMute} title={muted?"Unmute":"Mute"}
