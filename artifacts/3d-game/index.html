@@ -3,7 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+
+       <!-- 1. The CrazyGames SDK script you provided -->
     <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
+
+    <!-- 2. The initialization logic right under it -->
+    <script>
+        window.addEventListener('DOMContentLoaded', async () => {
+            if (window.CrazyGames && window.CrazyGames.SDK) {
+                // This call tells the CrazyGames QA system that the SDK is active
+                await window.CrazyGames.SDK.init();
+                console.log("CrazyGames SDK initialization complete!");
+            }
+        });
+    </script>
+
+    
     <!-- Primary meta -->
     <title>Doodle Jump – Play Free Online</title>
     <meta name="description" content="Play Doodle Jump online for free! Jump your frog higher and higher, bounce from platform to platform, dodge monsters and collect power-ups. How high can you go?" />
