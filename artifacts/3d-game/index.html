@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 
+
+    <script src="https://crazygames.com"></script>
+<script>
+    window.addEventListener('DOMContentLoaded', async () => {
+        if (window.CrazyGames && window.CrazyGames.SDK) {
+            await window.CrazyGames.SDK.init();
+            console.log("CrazyGames SDK initialized live!");
+        }
+    });
+</script>
+
+    
        <!-- 1. The CrazyGames SDK script you provided -->
     <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
 
