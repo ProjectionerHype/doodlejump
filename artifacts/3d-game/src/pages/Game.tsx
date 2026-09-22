@@ -882,9 +882,7 @@ export default function Game() {
       >{muted?"🔇":"🔊"}</button>
 
       {/* Left ad — hidden on narrow screens via CSS */}
-      <div className="side-ad">
-        <div id="container-fa2c350cca8a171485363cea2b95dd75"></div>
-      </div>
+      
 
       <div style={{position:"relative",borderRadius:"12px",overflow:"hidden",boxShadow:"0 8px 40px rgba(0,0,0,0.7), 0 0 0 3px #2a9010",flexShrink:0}}>
         <canvas ref={canvasRef} width={W} height={H}
@@ -893,14 +891,6 @@ export default function Game() {
       </div>
 
       {/* Right ad in its own iframe so the ad script can target the same container ID */}
-      <div className="side-ad">
-        <iframe
-          title="Advertisement"
-          scrolling="no"
-          style={{border:"none",width:160,height:600,display:"block"}}
-          srcDoc={adSrc}
-        />
-      </div>
-    </div>
+      
   );
 }
