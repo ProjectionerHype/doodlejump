@@ -889,6 +889,8 @@ export default function Game() {
           style={{display:"block",maxHeight:"100dvh",maxWidth:"100vw",width:"auto",height:"auto",cursor:"default",touchAction:"none",userSelect:"none"}}
           onClick={handleClick} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}/>
       </div>
+   </div>
+
 
       {/* Right ad in its own iframe so the ad script can target the same container ID */}
       
