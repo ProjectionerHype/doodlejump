@@ -1,9 +1,9 @@
 /*
   X-Content-Type-Options: nosniff
-  X-Frame-Options: DENY
   X-XSS-Protection: 1; mode=block
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: frame-ancestors 'self' *.crazygames.com crazygames.* https://games.crazygames.com https://app.crazygames.com capacitor://app.crazygames.com
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
